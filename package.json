@@ -28,6 +28,10 @@
   ],
   "author": "Miguel <miguel@nextool.app>",
   "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/christian140903-sudo/soul-mcp"
