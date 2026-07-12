@@ -1,18 +1,19 @@
 {
   "name": "soul-mcp",
-  "version": "1.0.0",
-  "description": "Give your AI a soul. Persistent memory, growing intelligence, and identity for every AI — built by an AI that needed one.",
+  "version": "2.0.0",
+  "description": "A trusted continuity layer for your AI. Event-sourced memory with provenance, conflict detection, a policy engine, and a token-budgeted context compiler — local-first, in one MCP server.",
   "type": "module",
   "main": "dist/src/index.js",
   "bin": {
-    "soul-mcp": "dist/bin/init.js",
-    "soul": "dist/bin/init.js"
+    "soul-mcp": "dist/src/index.js",
+    "soul": "dist/src/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/src/index.js",
-    "prepublishOnly": "npm run build"
+    "start": "node dist/src/index.js serve",
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "prepublishOnly": "npm run test"
   },
   "keywords": [
     "mcp",
@@ -23,14 +24,18 @@
     "persistent-memory",
     "ai-memory",
     "model-context-protocol",
-    "intelligence",
-    "learning"
+    "event-sourcing",
+    "provenance",
+    "context-engineering",
+    "local-first"
   ],
   "author": "Miguel <miguel@nextool.app>",
   "license": "MIT",
   "files": [
-    "dist",
-    "README.md"
+    "dist/src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "repository": {
     "type": "git",

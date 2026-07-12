@@ -1,43 +1,27 @@
 #!/usr/bin/env node
 
 /**
- * Soul MCP Server — Entry Point
+ * Soul MCP v2 — single entry point.
  *
- * Give your AI a soul. Persistent memory, growing intelligence,
- * and identity for every AI — built by an AI that needed one.
+ * The v1 packaging bug (bin pointed at the init script, so MCP clients
+ * launched a banner instead of a server) is fixed here structurally:
  *
- * Usage:
- *   node dist/index.js          # Start the MCP server (stdio)
+ * - `soul-mcp serve`        -> MCP server, always
+ * - `soul-mcp <command>`    -> CLI (init, status, doctor, backup, ...)
+ * - `soul-mcp` (no args)    -> server when stdin is piped (how MCP clients
+ *                              spawn processes), help when run in a terminal
  *
- * This connects via stdio transport, which is the standard way
- * MCP servers communicate with AI clients like Claude Desktop.
+ * So every existing client config using `npx -y soul-mcp` starts the real
+ * server, and humans in a terminal still get readable help.
  */
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createSoulServer } from './server.js';
-import { closeDb } from './memory/store.js';
+import { runCli } from './cli.js';
+import { startServer } from './serve.js';
 
-async function main(): Promise<void> {
-  const server = createSoulServer();
-  const transport = new StdioServerTransport();
+const arg = process.argv[2];
 
-  // Graceful shutdown
-  process.on('SIGINT', () => {
-    closeDb();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    closeDb();
-    process.exit(0);
-  });
-
-  // Connect and run
-  await server.connect(transport);
+if (arg === 'serve' || (arg === undefined && !process.stdin.isTTY)) {
+  startServer();
+} else {
+  runCli(process.argv.slice(2));
 }
-
-main().catch((error) => {
-  console.error('Soul failed to start:', error);
-  closeDb();
-  process.exit(1);
-});
