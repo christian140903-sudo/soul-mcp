@@ -23,5 +23,8 @@ const arg = process.argv[2];
 if (arg === 'serve' || (arg === undefined && !process.stdin.isTTY)) {
   startServer();
 } else {
-  runCli(process.argv.slice(2));
+  runCli(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

@@ -19,6 +19,7 @@ import {
   classifySensitiveCategory,
 } from './policy.js';
 import { newId, contentHash, canonicalize, nowIso } from '../util/core.js';
+import { embedLater, deleteVector } from './semantic.js';
 
 export type MemoryType =
   | 'episodic'
@@ -48,7 +49,9 @@ export type SourceType =
   | 'tool_output'
   | 'import'
   | 'migration'
-  | 'reflection';
+  | 'reflection'
+  /** produced by the model working a workbench assignment (Denkpartner protocol) */
+  | 'model_assisted';
 
 export interface Memory {
   id: string;
@@ -227,6 +230,11 @@ export function capture(input: CaptureInput): CaptureResult {
   });
   tx();
 
+  // Semantic layer (optional): embed asynchronously; the backfill sweep
+  // covers any embed that fails or races a shutdown. Quarantined content is
+  // never embedded — it must not become findable via similarity either.
+  if (status !== 'quarantined') embedLater(id, content);
+
   // 6. Conflict check (after insert so both sides can be linked)
   let conflicts: string[] = [];
   if (status === 'active' && ['preference', 'identity', 'goal'].includes(type)) {
@@ -372,6 +380,7 @@ export function forgetMemory(id: string, opts: { hard?: boolean; actor?: string 
   const actor = opts.actor || 'user';
   const tx = db.transaction(() => {
     if (opts.hard) {
+      deleteVector(id); // FK cascade would also remove it; this keeps the cache honest
       db.prepare(`DELETE FROM memories WHERE id = ?`).run(id);
       appendEvent('memory.deleted', 'memory', id, { hard: true, content_removed: true }, { actor });
     } else {
@@ -393,6 +402,36 @@ export function markUseful(id: string, useful: boolean): boolean {
         `UPDATE memories SET importance = MAX(0, importance - 0.05), updated_at = ? WHERE id = ?`
       ).run(nowIso(), id);
   return result.changes > 0;
+}
+
+/**
+ * Ebbinghaus-style consolidation (ported from anima-kernel, simplified and
+ * deterministic): memories that were never recalled slowly lose importance;
+ * memories that keep proving useful gain a little. Per-memory throttle of 7
+ * days (updated_at) so repeated housekeeping runs don't compound the drift.
+ * Nothing is deleted — this only reshapes the ranking pressure.
+ */
+export function consolidateImportance(): { decayed: number; strengthened: number } {
+  const db = getDb();
+  const now = nowIso();
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const oldCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString();
+
+  const decayed = db.prepare(
+    `UPDATE memories SET importance = MAX(0.1, importance - 0.05), updated_at = ?
+     WHERE status IN ('active','confirmed') AND access_count = 0 AND useful_count = 0
+       AND created_at < ? AND updated_at < ?`
+  ).run(now, oldCutoff, weekAgo).changes;
+
+  const strengthened = db.prepare(
+    `UPDATE memories SET importance = MIN(1.0, importance + 0.02), updated_at = ?
+     WHERE status IN ('active','confirmed') AND useful_count >= 3 AND updated_at < ?`
+  ).run(now, weekAgo).changes;
+
+  if (decayed + strengthened > 0) {
+    appendEvent('memory.consolidated', 'system', null, { decayed, strengthened }, {});
+  }
+  return { decayed, strengthened };
 }
 
 /** Expire candidates that waited longer than the constitution's retention window. */
@@ -554,6 +593,7 @@ function defaultConfidence(sourceType: SourceType): number {
     case 'import': return 0.6;
     case 'migration': return 0.6;
     case 'reflection': return 0.5;
+    case 'model_assisted': return 0.5;
     case 'agent_inference': return 0.4;
   }
 }

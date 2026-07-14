@@ -15,7 +15,8 @@ import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { nowIso, contentHash } from '../util/core.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 5;
+export const SOUL_VERSION = '3.0.0';
 
 export function getSoulDir(): string {
   const dir = process.env.SOUL_DIR || join(homedir(), '.soul');
@@ -107,12 +108,21 @@ function migrate(db: Database.Database, from: number): void {
     } else if (from === 1) {
       migrateV1toV2(db);
     }
+    if (from < 3) {
+      createV3Additions(db);
+    }
+    if (from < 4) {
+      createV4Additions(db);
+    }
+    if (from < 5) {
+      createV5Additions(db);
+    }
     const upsertMeta = db.prepare(
       `INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
     );
     upsertMeta.run('schema_version', String(SCHEMA_VERSION), nowIso());
-    upsertMeta.run('soul_version', '2.0.0', nowIso());
+    upsertMeta.run('soul_version', SOUL_VERSION, nowIso());
   });
   tx();
 }
@@ -229,9 +239,71 @@ function createV2Schema(db: Database.Database): void {
   const setMeta = db.prepare(
     `INSERT OR IGNORE INTO meta (key, value, updated_at) VALUES (?, ?, ?)`
   );
-  setMeta.run('soul_version', '2.0.0', nowIso());
+  setMeta.run('soul_version', SOUL_VERSION, nowIso());
   setMeta.run('created_at', nowIso(), nowIso());
   setMeta.run('total_sessions', '0', nowIso());
+}
+
+/**
+ * v3: optional semantic layer. Vectors live in their own table so the
+ * memories table (and every v2 code path) is untouched; ON DELETE CASCADE
+ * keeps vectors from outliving a hard-deleted memory.
+ */
+function createV3Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_vectors (
+      id TEXT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      dim INTEGER NOT NULL,
+      vector BLOB NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_vectors_model ON memory_vectors(model);
+  `);
+}
+
+/**
+ * v4: the workbench — think-assignments Soul issues to the model in front
+ * of it (Denkpartner protocol). Assignments are persisted so a resolution
+ * can be validated against exactly what was asked.
+ */
+function createV4Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workbench_assignments (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      memory_ids TEXT NOT NULL DEFAULT '[]',
+      instruction TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      issued_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolution TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_workbench_status ON workbench_assignments(status);
+  `);
+}
+
+/**
+ * v5: the prediction ledger — testable claims with probabilities, resolved
+ * over time. From this Soul computes the model's real calibration (hit rate
+ * per confidence bucket, Brier score) and feeds it back: self-knowledge no
+ * base model has about itself.
+ */
+function createV5Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS predictions (
+      id TEXT PRIMARY KEY,
+      claim TEXT NOT NULL,
+      probability REAL NOT NULL,
+      due_at TEXT,
+      namespace TEXT NOT NULL DEFAULT 'default',
+      model_hint TEXT,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      outcome TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_predictions_open ON predictions(resolved_at) WHERE resolved_at IS NULL;
+  `);
 }
 
 /**

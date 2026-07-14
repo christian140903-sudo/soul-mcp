@@ -63,10 +63,10 @@ const { getSessionCount } = await import('../dist/src/kernel/stats.js');
 const { recall } = await import('../dist/src/kernel/retrieval.js');
 const { queryEvents } = await import('../dist/src/kernel/ledger.js');
 
-test('opening a v1 database migrates it to v2 with a backup', () => {
+test('opening a v1 database migrates it to the current schema with a backup', () => {
   getDb(); // triggers migration
   const backups = readdirSync(join(dir, 'backups'));
-  assert.ok(backups.some((b) => b.includes('pre-migration-v1-to-v2')), `backup exists: ${backups}`);
+  assert.ok(backups.some((b) => b.includes('pre-migration-v1-to-v')), `backup exists: ${backups}`);
 });
 
 test('v1 data survives: content, timestamps, counters, identity, session count', () => {
@@ -90,8 +90,8 @@ test('v1 data survives: content, timestamps, counters, identity, session count',
   assert.equal(getSessionCount(), 42);
 });
 
-test('migrated memories are searchable through v2 recall', () => {
-  const results = recall('typescript preference', { silent: true });
+test('migrated memories are searchable through recall', async () => {
+  const results = await recall('typescript preference', { silent: true });
   assert.ok(results.some((r) => r.id === 'mem_v1_1'));
 });
 

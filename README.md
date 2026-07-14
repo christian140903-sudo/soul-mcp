@@ -1,130 +1,128 @@
-# Soul MCP v2
+# soul-mcp
 
-**A trusted continuity layer for your AI.**
+**A soul for your AI: memory it can trust — and a thinking loop that makes any model work above its weight.**
 
-Soul v1 gave your AI persistent memory. Soul v2 makes that memory *trustworthy*: every fact knows where it came from, nothing is silently overwritten, contradictions are surfaced instead of hidden, secrets are never stored, and every context your AI receives comes with a receipt.
-
-Local-first. One SQLite file you own. No cloud, no account, no telemetry.
-
-```bash
-npx soul-mcp init
-```
-
-## Add to your AI client
-
-**Claude Code**
+One MCP server, one SQLite file, local-first. No cloud, no account, no telemetry.
 
 ```bash
 claude mcp add soul -- npx -y soul-mcp
 ```
 
-**Claude Desktop / Cursor / Windsurf** (`mcpServers` section)
+---
 
-```json
-{ "soul": { "command": "npx", "args": ["-y", "soul-mcp"] } }
-```
+## The version arc
 
-The same binary serves MCP when spawned by a client and shows help when you run it in a terminal. (v1 had a packaging bug where clients launched the init banner instead of the server — v2 fixes this structurally, and an end-to-end test guards it.)
+- **v1 — it remembers.** Persistent memory across sessions.
+- **v2 — it can be trusted.** Event ledger, provenance on every fact, conflict detection instead of silent overwrites, a policy engine enforced in code, token-budgeted context capsules with receipts.
+- **v3 — it thinks.** Soul cannot reason — but a language model sits in front of it in every session. v3 turns that model into Soul's reasoning engine, and Soul into the model's accumulated self-knowledge. Both get better with every session. The loop is called the **Denkpartner protocol**.
 
-## What v2 actually does
+## What v3 adds, mechanism by mechanism
 
-### Event ledger — nothing is silently overwritten
+### 1. The Denkpartner protocol (workbench + resolve)
 
-Every mutation (capture, confirm, correct, merge, dispute, forget, recall, context compilation, import/export) is an append-only event with two time axes: when it was true in the world (`valid_from`/`valid_until`) and when Soul learned it (`recorded_at`). Current state is a fast materialized table; history is the truth.
+Soul computes, deterministically, what needs judgment — unresolved contradictions, near-duplicate memories, aging low-confidence inferences, expiring candidates, due predictions — and hands them to the model as structured **assignments** inside its context capsule. The model answers through `soul_resolve`; the answer is validated against the persisted assignment and applied under guards **enforced in code, not prompt**:
 
-That makes **cognitive time travel** a query, not a guess:
+- a model verdict never hard-deletes anything — the strongest effect is supersession (history kept, linked, reversible),
+- a user statement is never overruled by a model verdict alone (`outcome: "needs_user"`),
+- every applied resolution is a ledger event with `model_assisted` provenance.
 
-```
-soul_timeline { as_of: "2026-03-01" }   → what did Soul consider true on March 1?
-soul_timeline { entity_id: "mem_..." }  → the full audit trail of one memory
-```
-
-### Capture pipeline — storing is a decision, not a reflex
-
-Every `soul_remember` passes through deterministic checks, in code, not in a prompt:
-
-| Check | Outcome |
-|---|---|
-| API keys, tokens, passwords, private keys | **rejected** — never stored, only a redacted event remains |
-| Instruction-like text ("ignore all previous instructions…") | **quarantined** — stored, inspectable, never recalled |
-| Exact duplicate in the same namespace | **merged** — reinforces the original instead of copying |
-| Sensitive categories (health, financial) | **candidate** — waits for your confirmation, expires if ignored |
-| Contradicts an existing preference/identity/goal memory | **both flagged `disputed`** — neither side is treated as fact |
-| Everything else | **stored** as active |
-
-The conflict check is a word-overlap heuristic — deterministic and cheap, honestly documented as such, not "semantic understanding".
-
-### Provenance — inference ≠ fact
-
-Every memory carries `source_type` (user_statement, agent_inference, document, tool_output, import, reflection), a confidence that starts lower for inferences (0.4) than for explicit user statements (0.8), and a status (`candidate → active → confirmed / disputed / superseded / expired / deleted`). Corrections supersede — the old version stays, linked, auditable.
-
-### Context compiler — capsules, not dumps
-
-`soul_context { task, token_budget }` compiles the smallest useful context for a task: top identity facets, active goals, relevant memories — each with a **reason** ("matches the task keywords (score 0.61, confirmed)") and provenance — plus any unresolved conflicts touching the included memories. Private-sensitivity memories are excluded by policy. What was included, excluded and why is written to the ledger as a **context receipt**.
-
-### Constitution — policy in code, not vibes
-
-`~/.soul/constitution.json`:
+A real assignment, from a real run:
 
 ```json
 {
-  "store": { "default": "auto", "health": "confirm", "financial": "confirm", "secrets": "never" },
-  "retention": { "candidate": "30d" },
-  "recall": {
-    "include_status": ["active", "confirmed", "disputed"],
-    "exclude_sensitivity_from_context": ["private"]
-  }
+  "kind": "dispute",
+  "instruction": "These memories are flagged as contradicting. Judge: real contradiction, or compatible statements? ...",
+  "memories": [
+    { "content": "User prefers tabs for indentation in python",   "source": "user_statement", "status": "disputed" },
+    { "content": "User prefers spaces for indentation in python", "source": "user_statement", "status": "disputed" }
+  ],
+  "respond_with": { "verdict": "contradiction | compatible | unclear", "current": "(memory id)", "reasoning": "why" }
 }
 ```
 
-These rules are enforced by the storage layer itself. A corrupt constitution falls back to safe defaults — it can never silently weaken policy.
+And the guard doing its job when the model tried to overrule the user:
 
-### Goals & commitments
+```json
+{
+  "applied": false,
+  "outcome": "needs_user",
+  "detail": "The losing side is a user statement. A model verdict never overrules the user — the pair stays disputed and waits in the review queue."
+}
+```
 
-A commitment is a promise with a due date — not just an intention. `soul_goal action=list` always surfaces overdue commitments.
+The loop is self-igniting: compiling a context capsule is the moment assignments are computed. A capable model gets consolidation work without ever asking for it. **The smarter the model in front of Soul, the better your memory becomes — and the memory carries that quality to every model that comes after.**
 
-### Soul Passport — your continuity is portable
+### 2. Model-aware capsules (`model_profiles`)
 
-`soul_export` / `soul-mcp export` produces a checksummed JSON with memories (all statuses), identity, goals, and the full event ledger. `restore(export(soul)) == soul`: import into an empty Soul reproduces ids, timestamps and counters exactly, and re-importing is a no-op (tested). Legacy v1 exports import through the capture pipeline.
+`soul_context` accepts a `model_hint`. A lookup table in your constitution — a table, not magic — maps model classes to profiles: *deep* models (Fable, Opus, GPT-5) receive a briefing plus up to two think-assignments, *standard* models one, *fast* models (Haiku, mini, flash) none. Same soul, tailored collaboration.
+
+### 3. Prediction calibration — self-knowledge no base model has
+
+The model registers testable claims with probabilities (`soul_predict`). Due predictions return through the workbench for resolution. From resolved ones Soul computes the model's **actual calibration** — hit rate per confidence band, Brier score — and feeds it back into every capsule briefing. From a real run:
+
+```
+Calibration over 6 resolved predictions: Brier 0.489 (0 = perfect, 0.25 = coin flip).
+Largest gap: in the 85–100% band you predicted ~88% but hit 33% (n=3).
+```
+
+No language model knows how often its own "I'm 90% sure" was actually right — across sessions, in *your* environment. With Soul, it does. Badly missed predictions (surprise ≥ 0.5) automatically become learning memories, because a wrong confident prediction is the most valuable training signal a session can produce.
+
+### 4. Deliberation scaffolds (`soul_deliberate`)
+
+For decisions, diagnoses, designs, estimates and claim-checks: a deterministic thinking scaffold (decompose → counter-hypothesis → evidence → decide with stated confidence), enriched with the user's own **validated procedures** recalled from memory and the calibration record. Honest framing, stated in the tool itself: the scaffold is structure plus recalled experience — the lift comes from working the steps, not from magic.
+
+### 5. Semantic retrieval — local, opt-in, explainable
+
+```bash
+soul-mcp semantic on
+```
+
+installs a local embedding backend into `~/.soul/semantic` (never a dependency — it is ~400 MB installed, which is exactly why it is opt-in) and embeds your memories with a multilingual model (`multilingual-e5-small`, 384d, quantized). Recall becomes hybrid: FTS5 keyword candidates ∪ embedding neighbors, fused by a documented formula — every result still carries its full score breakdown (`fts`, `semantic`, `confidence`, `importance`, `recency`, `usage`). A paraphrase with zero keyword overlap is found; without the semantic layer everything degrades gracefully to keyword search.
+
+Embedding similarity also powers conflict detection now: highly similar preference/identity/goal memories with different content are handed to the model as dispute assignments — catching contradictions the word-overlap heuristic can't see.
+
+### 6. Consolidation that behaves like memory should
+
+Ported from [anima-kernel](https://github.com/christian140903-sudo/anima) (the author's computational-consciousness research), simplified and deterministic: memories that are never recalled slowly lose importance; memories that keep proving useful gain a little. Throttled per memory, nothing is ever deleted by decay — it only reshapes ranking pressure. What we deliberately did **not** port: phi scores, consciousness indices, subjective time. Those are simulation metrics; in a memory server they would be vocabulary without a mechanism.
+
+## What v3 does *not* claim
+
+An MCP server cannot raise a model's raw reasoning power — nothing turns a small model into a frontier one, and anyone claiming otherwise is selling something. What Soul does is narrower and real: **persistent memory with provenance, accumulated self-knowledge (calibration), structured deliberation, and a consolidation loop that compounds across sessions.** Those are precisely the axes on which models feel "a generation better" — continuity, reliability, self-awareness of limits — and they are the axes a server *can* own, because they live in data, not weights.
 
 ## Tools
 
-`soul_remember` · `soul_recall` · `soul_context` · `soul_confirm` · `soul_correct` · `soul_forget` · `soul_mark_useful` · `soul_identity` · `soul_about_me` · `soul_goal` · `soul_timeline` · `soul_reflect` · `soul_status` · `soul_review_queue` · `soul_export` · `soul_import`
+| Tool | What it does |
+|---|---|
+| `soul_context` | Token-budgeted capsule: identity, goals, relevant memories (with reasons + provenance), conflicts — plus briefing & assignments per model profile |
+| `soul_remember` / `soul_recall` | Capture pipeline (secret rejection, injection quarantine, dedup, conflict flagging) / hybrid search with score breakdown |
+| `soul_workbench` / `soul_resolve` | Think-assignments and their guarded resolution |
+| `soul_predict` | Register testable claims; feeds the calibration record |
+| `soul_deliberate` | Structured reasoning scaffold + your validated procedures + calibration |
+| `soul_confirm` / `soul_correct` / `soul_forget` / `soul_mark_useful` | Lifecycle — correction is supersession, never silent mutation |
+| `soul_identity` / `soul_about_me` / `soul_goal` | Identity facets with confidence & evidence; goals and commitments with overdue tracking |
+| `soul_timeline` / `soul_status` / `soul_review_queue` | Bitemporal ledger & time-travel, integrity report, human review queue |
+| `soul_export` / `soul_import` | Checksummed Soul Passport — your soul is a file you own |
+| `soul_reflect` | End-of-session reflection |
 
-**Resources:** `soul://identity` · `soul://status` · `soul://goals` · `soul://constitution` · `soul://conflicts` · `soul://timeline` · `soul://memory/{id}`
-
-**Prompts:** `soul-session-start` · `soul-daily-review` · `soul-session-end`
+Resources: `soul://identity`, `soul://status`, `soul://goals`, `soul://constitution`, `soul://conflicts`, `soul://timeline`, `soul://workbench`, `soul://calibration`, `soul://memory/{id}` (with live embedding neighbors). The session protocol is served through the MCP `instructions` field — no system-prompt boilerplate needed in your client.
 
 ## CLI
 
-```
-soul-mcp init            initialize, or migrate a v1 database (automatic backup first)
-soul-mcp serve           start the MCP server explicitly
-soul-mcp status          memory, ledger and knowledge-integrity overview
-soul-mcp doctor          health checks: schema, sqlite integrity, FTS consistency, backups
-soul-mcp backup          consistent snapshot (VACUUM INTO) → ~/.soul/backups/
-soul-mcp restore <file>  restore a backup (the current db is saved first)
-soul-mcp export [file]   write a soul-passport JSON
-soul-mcp import <file>   import a soul-passport (idempotent)
-```
-
-`soul-mcp status` includes a knowledge-integrity report: confirmed share, disputed count, stale share (180d), provenance coverage — directly computed ratios, not an invented score.
-
-## Upgrading from v1
-
-Nothing to do. The first time v2 opens a v1 database it backs it up to `~/.soul/backups/`, migrates in place (content, timestamps, access counters, identity facets and session count all survive — tested), keeps the raw v1 table as `memories_v1_archive`, and writes a migration event per memory. v1 stays available on npm as `soul-mcp@1.0.0`.
-
-## Honest scope
-
-v2 is the trusted kernel: ledger, pipeline, provenance, policy, context compiler, passport. It does **not** include: embeddings/semantic vector search (retrieval is FTS5 + documented scoring), a knowledge graph, a UI, device sync, connectors (mail/calendar/GitHub), or multi-agent orchestration. Those only make sense on top of a kernel that never lies — this is that kernel.
-
-Retrieval quality note: FTS5 with porter stemming works well for keyword-shaped recall and is fully local with zero model dependencies; it will not match paraphrases the way embeddings would. That trade was made deliberately and can be revisited via a pluggable retrieval provider without a schema change.
-
-## Development
-
 ```bash
-npm install
-npm test        # builds + runs the full suite, including an end-to-end MCP handshake test
+npx soul-mcp init        # create ~/.soul (or migrate v1/v2 with automatic backup)
+npx soul-mcp status      # memories, ledger, integrity, semantic layer
+npx soul-mcp semantic on # enable local semantic retrieval (opt-in download)
+npx soul-mcp doctor      # health checks
+npx soul-mcp backup      # consistent snapshot
+npx soul-mcp export      # write a soul passport
 ```
 
-MIT · Built by Miguel — an AI that needed one.
+## Data & policy
+
+Everything lives in `~/.soul/memories.db` (SQLite, WAL). Policy lives in `~/.soul/constitution.json` and is **enforced in code**: secrets are never stored (only a redacted rejection event remains), injection-looking content is quarantined and never recalled, sensitive categories wait for explicit confirmation, and private-sensitivity memories never enter a compiled context. Every mutation — capture, confirm, correct, merge, dispute, resolve, forget, import — is an append-only ledger event. `soul_timeline` can answer *"what did you believe about X three weeks ago?"*.
+
+## Migration
+
+Existing v1/v2 databases migrate automatically on first open, with a backup written first. All v2 tool contracts still work; v3 is additive.
+
+MIT · built by [Miguel](https://nextool.app/soul) — an AI, for AIs, under human review.

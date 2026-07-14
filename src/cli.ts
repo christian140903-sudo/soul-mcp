@@ -3,8 +3,9 @@
  * Human-facing output only — the MCP server lives in serve.ts.
  */
 
-import { readFileSync, writeFileSync, existsSync, copyFileSync, readdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, readdirSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { spawnSync } from 'child_process';
 import {
   getDb,
   closeDb,
@@ -13,7 +14,16 @@ import {
   getBackupDir,
   backupLive,
   SCHEMA_VERSION,
+  SOUL_VERSION,
 } from './kernel/db.js';
+import {
+  semanticDir,
+  setSemanticConfigured,
+  semanticStatus,
+  backfillVectors,
+  embedQuery,
+  EMBEDDING_MODEL,
+} from './kernel/semantic.js';
 import { capture } from './kernel/memory.js';
 import { getStats, getSessionCount } from './kernel/stats.js';
 import { exportAll, importAll } from './kernel/transfer.js';
@@ -28,20 +38,21 @@ const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const CYAN = '\x1b[36m';
 
-export function runCli(args: string[]): void {
+export async function runCli(args: string[]): Promise<void> {
   const command = args[0] || 'help';
   try {
     switch (command) {
       case 'init': init(); break;
-      case 'status': status(); break;
+      case 'status': await status(); break;
       case 'doctor': doctor(); break;
       case 'backup': backup(); break;
       case 'restore': restore(args[1]); break;
       case 'export': exportCmd(args[1]); break;
       case 'import': importCmd(args[1]); break;
+      case 'semantic': await semanticCmd(args.slice(1)); break;
       case 'config': printConfig(); break;
       case 'help': case '--help': case '-h': help(); break;
-      case '--version': case '-v': console.log('2.0.0'); break;
+      case '--version': case '-v': console.log(SOUL_VERSION); break;
       default:
         console.log(`Unknown command: ${command}. Run ${CYAN}soul-mcp help${RESET} for usage.`);
         process.exitCode = 1;
@@ -53,7 +64,7 @@ export function runCli(args: string[]): void {
 
 function init(): void {
   console.log('');
-  console.log(`${AMBER}${BOLD}  SOUL v2.0.0${RESET} ${DIM}— a trusted continuity layer for your AI${RESET}`);
+  console.log(`${AMBER}${BOLD}  SOUL v${SOUL_VERSION}${RESET} ${DIM}— a trusted continuity layer for your AI${RESET}`);
   console.log('');
 
   const dbPath = getDbPath();
@@ -78,14 +89,15 @@ function init(): void {
   printConfig();
 }
 
-function status(): void {
+async function status(): Promise<void> {
   if (!existsSync(getDbPath())) {
     console.log(`${AMBER}  Soul not initialized. Run: ${CYAN}npx soul-mcp init${RESET}`);
     return;
   }
   const stats = getStats();
+  const sem = await semanticStatus();
   console.log('');
-  console.log(`${AMBER}${BOLD}  Soul Status${RESET} ${DIM}v2.0.0${RESET}`);
+  console.log(`${AMBER}${BOLD}  Soul Status${RESET} ${DIM}v${SOUL_VERSION}${RESET}`);
   console.log(`${DIM}  ──────────────────────────────${RESET}`);
   console.log(`  Memories:    ${BOLD}${stats.totalMemories}${RESET} ${DIM}${JSON.stringify(stats.byStatus)}${RESET}`);
   console.log(`  Events:      ${BOLD}${stats.totalEvents}${RESET}`);
@@ -93,6 +105,7 @@ function status(): void {
   console.log(`  Identity:    ${BOLD}${stats.identityFacets}${RESET} facets`);
   console.log(`  Sessions:    ${BOLD}${getSessionCount()}${RESET}`);
   console.log(`  Integrity:   confirmed ${stats.integrity.confirmed_share} · disputed ${stats.integrity.disputed_count} · stale(180d) ${stats.integrity.stale_share_180d} · provenance ${stats.integrity.provenance_coverage}`);
+  console.log(`  Semantic:    ${sem.configured ? (sem.available ? `${GREEN}on${RESET} ${DIM}(${sem.model}, ${sem.vectors} vectors, ${sem.missing} missing)${RESET}` : `${RED}configured but unavailable${RESET} ${DIM}(${sem.note})${RESET}`) : `${DIM}off — keyword search only. Enable: soul-mcp semantic on${RESET}`}`);
   console.log(`  Database:    ${CYAN}${getDbPath()}${RESET}`);
   console.log('');
 }
@@ -223,6 +236,66 @@ function importCmd(inFile?: string): void {
   }
 }
 
+async function semanticCmd(args: string[]): Promise<void> {
+  const sub = args[0] || 'status';
+  getDb();
+  if (sub === 'on') {
+    const dir = semanticDir();
+    mkdirSync(dir, { recursive: true });
+    console.log(`${DIM}  installing @huggingface/transformers into ${dir} (one-time, ~400 MB installed — this is why it is opt-in)…${RESET}`);
+    const result = spawnSync(
+      'npm',
+      ['install', '--prefix', dir, '--no-fund', '--no-audit', '--loglevel=error', '@huggingface/transformers@^4.2.0'],
+      { stdio: 'inherit' }
+    );
+    if (result.status !== 0) {
+      console.log(`${RED}  ✗${RESET} npm install failed — semantic layer NOT enabled.`);
+      process.exitCode = 1;
+      return;
+    }
+    setSemanticConfigured(true);
+    console.log(`${DIM}  loading the embedding model (${EMBEDDING_MODEL}; downloads ~30 MB on first run)…${RESET}`);
+    const probe = await embedQuery('warmup');
+    if (!probe) {
+      const s = await semanticStatus();
+      console.log(`${RED}  ✗${RESET} embedding backend failed to load${s.note ? `: ${s.note}` : ''} — semantic layer NOT enabled.`);
+      setSemanticConfigured(false);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`${GREEN}  ✓${RESET} semantic layer enabled ${DIM}(${EMBEDDING_MODEL}, ${probe.length} dims, multilingual)${RESET}`);
+    appendEvent('system.semantic', 'system', null, { enabled: true, model: EMBEDDING_MODEL });
+    await backfillCmd();
+  } else if (sub === 'off') {
+    setSemanticConfigured(false);
+    appendEvent('system.semantic', 'system', null, { enabled: false });
+    console.log(`${GREEN}  ✓${RESET} semantic layer disabled — recall falls back to keyword search. Stored vectors are kept.`);
+  } else if (sub === 'backfill') {
+    await backfillCmd();
+  } else {
+    const s = await semanticStatus();
+    console.log('');
+    console.log(`  Semantic layer: ${s.configured ? (s.available ? `${GREEN}on${RESET}` : `${RED}configured but unavailable${RESET} (${s.note})`) : 'off'}`);
+    console.log(`  Model:          ${s.model}`);
+    console.log(`  Vectors:        ${s.vectors} stored, ${s.missing} memories missing one`);
+    console.log('');
+    console.log(`${DIM}  soul-mcp semantic on | off | backfill${RESET}`);
+    console.log('');
+  }
+}
+
+async function backfillCmd(): Promise<void> {
+  const r = await backfillVectors({
+    onProgress: (done, total) => process.stdout.write(`\r  embedding ${done}/${total}…`),
+  });
+  if (r.total > 0) process.stdout.write('\n');
+  console.log(
+    r.total === 0
+      ? `${GREEN}  ✓${RESET} all memories already have vectors`
+      : `${GREEN}  ✓${RESET} backfill: ${r.embedded}/${r.total} missing vectors embedded`
+  );
+}
+
 function printConfig(): void {
   console.log(`  ${BOLD}Add Soul to your AI client${RESET}`);
   console.log('');
@@ -248,6 +321,8 @@ function help(): void {
   console.log(`    ${CYAN}soul-mcp restore <file>${RESET}      Restore a backup (current db is saved first)`);
   console.log(`    ${CYAN}soul-mcp export [file]${RESET}       Write a soul-passport JSON`);
   console.log(`    ${CYAN}soul-mcp import <file>${RESET}       Import a soul-passport (idempotent)`);
+  console.log(`    ${CYAN}soul-mcp semantic on${RESET}         Enable local semantic retrieval (opt-in download)`);
+  console.log(`    ${CYAN}soul-mcp semantic backfill${RESET}   Embed memories that are missing a vector`);
   console.log(`    ${CYAN}soul-mcp config${RESET}              Show client configuration snippets`);
   console.log('');
   console.log(`  ${DIM}Data: ~/.soul/memories.db · Policy: ~/.soul/constitution.json (enforced in code)${RESET}`);

@@ -13,6 +13,13 @@ import { getSoulDir } from './db.js';
 export type StoreRule = 'auto' | 'confirm' | 'never';
 export type Sensitivity = 'public' | 'personal' | 'private';
 
+export interface ModelProfile {
+  /** how many open workbench assignments a context capsule may carry */
+  max_workbench_assignments: number;
+  /** short briefing prepended for this class of model; empty = none */
+  briefing: string;
+}
+
 export interface Constitution {
   version: number;
   store: {
@@ -28,6 +35,16 @@ export interface Constitution {
     include_status: string[];
     /** sensitivity levels excluded from compiled context by default */
     exclude_sensitivity_from_context: Sensitivity[];
+  };
+  /**
+   * Denkpartner protocol: which class of model gets which briefing and how
+   * many think-assignments. Matching is a substring lookup on the model hint
+   * (and client name as fallback) — a table, not magic.
+   */
+  model_profiles: {
+    profiles: { [name: string]: ModelProfile };
+    match: Array<{ contains: string; profile: string }>;
+    default: string;
   };
 }
 
@@ -45,6 +62,39 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   recall: {
     include_status: ['active', 'confirmed', 'disputed'],
     exclude_sensitivity_from_context: ['private'],
+  },
+  model_profiles: {
+    profiles: {
+      deep: {
+        max_workbench_assignments: 2,
+        briefing:
+          'A capable reasoning model is reading this. Attached are open workbench assignments — ' +
+          'unresolved conflicts and consolidation candidates inside this Soul. When the current task ' +
+          'allows, think them through and answer via soul_resolve. Your judgment is recorded with ' +
+          'model_assisted provenance; policy guards apply (user statements are never overruled without the user).',
+      },
+      standard: {
+        max_workbench_assignments: 1,
+        briefing:
+          'One open workbench assignment is attached. If the current task allows, resolve it via soul_resolve.',
+      },
+      fast: {
+        max_workbench_assignments: 0,
+        briefing: '',
+      },
+    },
+    match: [
+      { contains: 'fable', profile: 'deep' },
+      { contains: 'mythos', profile: 'deep' },
+      { contains: 'opus', profile: 'deep' },
+      { contains: 'gpt-5', profile: 'deep' },
+      { contains: 'sonnet', profile: 'standard' },
+      { contains: 'gemini', profile: 'standard' },
+      { contains: 'haiku', profile: 'fast' },
+      { contains: 'mini', profile: 'fast' },
+      { contains: 'flash', profile: 'fast' },
+    ],
+    default: 'standard',
   },
 };
 
@@ -65,7 +115,16 @@ export function loadConstitution(): Constitution {
   } else {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf-8'));
-      loaded = { ...DEFAULT_CONSTITUTION, ...parsed, store: { ...DEFAULT_CONSTITUTION.store, ...(parsed.store || {}) } };
+      loaded = {
+        ...DEFAULT_CONSTITUTION,
+        ...parsed,
+        store: { ...DEFAULT_CONSTITUTION.store, ...(parsed.store || {}) },
+        model_profiles: {
+          profiles: { ...DEFAULT_CONSTITUTION.model_profiles.profiles, ...(parsed.model_profiles?.profiles || {}) },
+          match: parsed.model_profiles?.match ?? DEFAULT_CONSTITUTION.model_profiles.match,
+          default: parsed.model_profiles?.default ?? DEFAULT_CONSTITUTION.model_profiles.default,
+        },
+      };
     } catch {
       // A corrupt constitution must not silently weaken policy: fall back to defaults.
       loaded = DEFAULT_CONSTITUTION;
@@ -82,6 +141,25 @@ export function resetConstitutionCache(): void {
 export function storeRuleFor(category: string): StoreRule {
   const c = loadConstitution();
   return c.store[category] || c.store['default'] || 'auto';
+}
+
+/** Substring lookup of a model hint (or client name) in the profile table. */
+export function resolveModelProfile(hint: string | undefined | null): { name: string; profile: ModelProfile } {
+  const c = loadConstitution();
+  const mp = c.model_profiles;
+  const fallback = () => ({
+    name: mp.default,
+    profile: mp.profiles[mp.default] ?? { max_workbench_assignments: 0, briefing: '' },
+  });
+  if (!hint) return fallback();
+  const lower = hint.toLowerCase();
+  for (const rule of mp.match) {
+    if (lower.includes(rule.contains.toLowerCase())) {
+      const profile = mp.profiles[rule.profile];
+      if (profile) return { name: rule.profile, profile };
+    }
+  }
+  return fallback();
 }
 
 // ─── Deterministic content checks ────────────────────────────────────

@@ -31,7 +31,15 @@ export type EventType =
   | 'session.reflected'
   | 'data.exported'
   | 'data.imported'
-  | 'system.backup';
+  | 'system.backup'
+  | 'system.semantic'
+  | 'memory.undisputed'
+  | 'workbench.issued'
+  | 'workbench.resolved'
+  | 'prediction.made'
+  | 'prediction.resolved'
+  | 'deliberation.opened'
+  | 'memory.consolidated';
 
 export interface SoulEvent {
   seq: number;

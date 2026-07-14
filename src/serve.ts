@@ -7,6 +7,7 @@ import { createSoulServer } from './server.js';
 import { closeDb, getDb } from './kernel/db.js';
 import { expireStaleCandidates } from './kernel/memory.js';
 import { loadConstitution } from './kernel/policy.js';
+import { isSemanticConfigured, backfillVectors } from './kernel/semantic.js';
 import { parseDuration } from './util/core.js';
 
 export function startServer(): void {
@@ -18,6 +19,15 @@ export function startServer(): void {
     if (ms !== null) {
       const expired = expireStaleCandidates(ms);
       if (expired > 0) console.error(`[soul] expired ${expired} stale candidate(s)`);
+    }
+    // Close embedding gaps in the background (captures whose async embed
+    // failed or was cut off). No-op when the semantic layer is off.
+    if (isSemanticConfigured()) {
+      void backfillVectors()
+        .then((r) => {
+          if (r.embedded > 0) console.error(`[soul] semantic backfill: ${r.embedded}/${r.total} vector(s)`);
+        })
+        .catch(() => {});
     }
   } catch (error) {
     console.error('[soul] failed to open database:', error);

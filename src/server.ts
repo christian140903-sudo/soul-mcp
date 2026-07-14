@@ -29,6 +29,10 @@ import { exportAll, importAll, importV1Export, type SoulExportV2 } from './kerne
 import { getStats, incrementSession, getSessionCount } from './kernel/stats.js';
 import { queryEvents, memoriesAsOf } from './kernel/ledger.js';
 import { loadConstitution } from './kernel/policy.js';
+import { computeAssignments, resolveAssignment, openAssignmentViews } from './kernel/workbench.js';
+import { makePrediction, listPredictions, getCalibration, deliberate, type DeliberationKind } from './kernel/cognition.js';
+import { relatedMemories } from './kernel/semantic.js';
+import { SOUL_VERSION } from './kernel/db.js';
 
 const MEMORY_TYPES = ['episodic', 'semantic', 'procedural', 'preference', 'relationship', 'goal', 'identity', 'working'] as const;
 const SOURCE_TYPES = ['user_statement', 'agent_inference', 'document', 'tool_output', 'import', 'reflection'] as const;
@@ -38,7 +42,26 @@ function jsonResult(payload: unknown) {
 }
 
 export function createSoulServer(): McpServer {
-  const server = new McpServer({ name: 'soul', version: '2.0.0' });
+  const server = new McpServer(
+    { name: 'soul', version: SOUL_VERSION },
+    {
+      // Served to the client at initialize time — the session protocol lives
+      // here, in the server, instead of being hand-maintained in every
+      // client's system prompt.
+      instructions:
+        "Soul is this user's persistent continuity layer (memory, identity, goals) with provenance and " +
+        'an event ledger.\n' +
+        '1. When the task becomes clear (once per session), call soul_context with a short task ' +
+        'description and your model id as model_hint. The capsule carries identity, goals, relevant ' +
+        'memories (each with source and confidence) and possibly workbench assignments addressed to you.\n' +
+        '2. Store substantial NEW facts via soul_remember. Set source_type honestly: user_statement only ' +
+        'for explicit statements, agent_inference for your own conclusions. Quality over quantity.\n' +
+        '3. Never treat a disputed memory as fact — ask, or present both sides.\n' +
+        '4. If the capsule carries workbench assignments and the current task allows, think them through ' +
+        'and answer via soul_resolve. Guards are enforced in code; your judgment is recorded as model_assisted.\n' +
+        '5. At session end (or when the user says goodbye), call soul_reflect with 2-3 sentences and real learnings.',
+    }
+  );
 
   // ─── Tools ──────────────────────────────────────────────────────────
 
@@ -105,7 +128,7 @@ export function createSoulServer(): McpServer {
       }),
     },
     async ({ query, limit, category, type, namespace }) => {
-      const results = recall(query, { limit: limit ?? 10, category, type, namespace, actor: 'agent' });
+      const results = await recall(query, { limit: limit ?? 10, category, type, namespace, actor: 'agent' });
       if (results.length === 0) {
         return jsonResult({ found: 0, message: `No memories found for "${query}".` });
       }
@@ -143,11 +166,110 @@ export function createSoulServer(): McpServer {
         task: z.string().describe('What you are about to do. The capsule is optimized for this.'),
         token_budget: z.number().min(200).max(20000).optional().describe('Capsule size budget (default 1800 estimated tokens).'),
         namespace: z.string().optional(),
+        model_hint: z.string().optional().describe(
+          'Your model id/name (e.g. "claude-fable-5"). Soul tailors the capsule to the model: capable ' +
+          'models receive open workbench assignments to think through, fast models receive none.'
+        ),
       }),
     },
-    async ({ task, token_budget, namespace }) => {
-      const capsule = compileContext(task, { tokenBudget: token_budget, namespace, actor: 'agent' });
+    async ({ task, token_budget, namespace, model_hint }) => {
+      const hint = model_hint || server.server.getClientVersion()?.name;
+      const capsule = await compileContext(task, { tokenBudget: token_budget, namespace, actor: 'agent', modelHint: hint });
       return jsonResult(capsule);
+    }
+  );
+
+  server.registerTool(
+    'soul_workbench',
+    {
+      title: 'Workbench',
+      description:
+        'Soul\'s think-assignments for you (the Denkpartner protocol): unresolved conflicts, near-duplicate ' +
+        'merge candidates, old low-confidence inferences and expiring candidates — computed deterministically, ' +
+        'each with the exact answer shape. Work them through when the current task allows, then answer with ' +
+        'soul_resolve. Your judgment is applied under policy guards and recorded with model_assisted provenance.',
+      inputSchema: z.object({
+        limit: z.number().min(1).max(20).optional().describe('Max open assignments to return (default 10).'),
+      }),
+    },
+    async ({ limit }) => {
+      const assignments = computeAssignments({ maxNew: limit ?? 10 }).slice(0, limit ?? 10);
+      return jsonResult({
+        open: assignments.length,
+        assignments,
+        message:
+          assignments.length === 0
+            ? 'Nothing needs judgment right now.'
+            : `${assignments.length} assignment(s). Answer each via soul_resolve({assignment_id, resolution}).`,
+      });
+    }
+  );
+
+  server.registerTool(
+    'soul_resolve',
+    {
+      title: 'Resolve Assignment',
+      description:
+        'Answer a workbench assignment. The resolution is validated against the assignment\'s schema and ' +
+        'applied under guards enforced in code: nothing is hard-deleted, supersession keeps history, and a ' +
+        'user statement is never overruled by a model verdict alone (outcome: needs_user).',
+      inputSchema: z.object({
+        assignment_id: z.string(),
+        resolution: z.record(z.unknown()).describe('The answer, matching the assignment\'s respond_with shape.'),
+      }),
+    },
+    async ({ assignment_id, resolution }) => {
+      const result = resolveAssignment(assignment_id, resolution, 'agent');
+      return jsonResult(result);
+    }
+  );
+
+  server.registerTool(
+    'soul_predict',
+    {
+      title: 'Register Prediction',
+      description:
+        'Register a testable claim with a probability. Due predictions return through the workbench for ' +
+        'resolution; from resolved ones Soul computes your actual calibration (hit rate per confidence band, ' +
+        'Brier score) and feeds it back into future context capsules. Badly missed predictions automatically ' +
+        'become learning memories. Use whenever you state a confident, checkable claim.',
+      inputSchema: z.object({
+        claim: z.string().describe('The falsifiable claim, specific enough to judge later.'),
+        probability: z.number().min(0.01).max(0.99).describe('Your honest probability that it is true.'),
+        due_at: z.string().optional().describe('ISO date when the claim becomes judgeable.'),
+        namespace: z.string().optional(),
+      }),
+    },
+    async ({ claim, probability, due_at, namespace }) => {
+      const p = makePrediction({
+        claim,
+        probability,
+        dueAt: due_at,
+        namespace,
+        modelHint: server.server.getClientVersion()?.name,
+      });
+      return jsonResult({ id: p.id, claim: p.claim, probability: p.probability, due_at: p.dueAt, message: 'Registered. It will return via the workbench when due.' });
+    }
+  );
+
+  server.registerTool(
+    'soul_deliberate',
+    {
+      title: 'Deliberate',
+      description:
+        'Get a structured thinking scaffold for a hard problem: decomposition, counter-hypothesis, evidence ' +
+        'checks — plus the user\'s own validated procedures from memory and your calibration record. ' +
+        'Deterministic structure, not magic: the lift comes from working the steps and from recalled experience. ' +
+        'Use for decisions, diagnoses, designs, estimates and claim-checks that deserve more than a reflex.',
+      inputSchema: z.object({
+        problem: z.string().describe('The problem, in one or two sentences.'),
+        kind: z.enum(['decision', 'diagnosis', 'design', 'estimate', 'check']).optional().describe('Scaffold type. Inferred from the problem if omitted.'),
+        namespace: z.string().optional(),
+      }),
+    },
+    async ({ problem, kind, namespace }) => {
+      const d = await deliberate(problem, kind as DeliberationKind | undefined, namespace);
+      return jsonResult(d);
     }
   );
 
@@ -204,6 +326,7 @@ export function createSoulServer(): McpServer {
         id: z.string(),
         hard: z.boolean().optional().describe('true = remove row entirely. Default false.'),
       }),
+      annotations: { destructiveHint: true, openWorldHint: false },
     },
     async ({ id, hard }) => {
       const ok = forgetMemory(id, { hard });
@@ -273,7 +396,7 @@ export function createSoulServer(): McpServer {
       const identity = getAllIdentity(namespace);
       const stats = getStats();
       const goals = listGoals({ status: ['active', 'blocked'], namespace, limit: 10 });
-      const preferences = recall('preference prefers likes style', { limit: 8, type: 'preference', namespace, silent: true });
+      const preferences = await recall('preference prefers likes style', { limit: 8, type: 'preference', namespace, silent: true });
       const conflicts = listDisputedPairs(5);
       return jsonResult({
         sessions_together: getSessionCount(),
@@ -545,6 +668,13 @@ export function createSoulServer(): McpServer {
   staticResource('timeline', 'soul://timeline', 'The 50 most recent ledger events', () =>
     queryEvents({ limit: 50 })
   );
+  staticResource('workbench', 'soul://workbench', 'Open think-assignments (Denkpartner protocol)', () =>
+    openAssignmentViews()
+  );
+  staticResource('calibration', 'soul://calibration', 'The model\'s prediction calibration record', () => ({
+    calibration: getCalibration(),
+    open_predictions: listPredictions({ open: true, limit: 20 }),
+  }));
 
   server.registerResource(
     'memory',
@@ -558,6 +688,7 @@ export function createSoulServer(): McpServer {
           text: JSON.stringify(
             {
               memory: getMemoryById(String(id)),
+              related: relatedMemories(String(id), 5), // live embedding neighbors; [] when semantic is off
               history: queryEvents({ entityId: String(id), limit: 50 }),
             },
             null,
