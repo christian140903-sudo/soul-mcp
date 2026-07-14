@@ -317,54 +317,108 @@ function linkContradiction(aId: string, bId: string, now: string): void {
 
 // ─── Lifecycle operations ────────────────────────────────────────────
 
-export function confirmMemory(id: string, actor = 'user'): Memory | null {
+/**
+ * Ledger integrity, hard rule with no override: the actor 'user' exists only
+ * together with real (non-whitespace) evidence of the user's words; without
+ * evidence the action still applies but is booked as the agent's.
+ */
+function provenanceActor(userEvidence: string | undefined): { actor: 'user' | 'agent'; evidence?: string } {
+  const evidence = userEvidence?.trim() || undefined;
+  return evidence ? { actor: 'user', evidence } : { actor: 'agent' };
+}
+
+export function confirmMemory(
+  id: string,
+  opts: { userEvidence?: string } = {}
+): Memory | null {
   const db = getDb();
   const mem = getMemoryById(id);
   if (!mem) return null;
+  const { actor, evidence } = provenanceActor(opts.userEvidence);
   const now = nowIso();
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE memories SET status = 'confirmed', confidence = MIN(1.0, confidence + 0.2), updated_at = ? WHERE id = ?`
     ).run(now, id);
-    appendEvent('memory.confirmed', 'memory', id, { previous_status: mem.status }, { actor });
+    appendEvent('memory.confirmed', 'memory', id, {
+      previous_status: mem.status,
+      ...(evidence ? { user_evidence: evidence } : {}),
+    }, { actor });
   });
   tx();
   return getMemoryById(id);
 }
 
 /**
+ * When a memory leaves the live set (superseded, expired, deleted), its
+ * contradiction links must not keep partners hostage: the partner's back-link
+ * is removed and, if that was its last conflict, the partner returns to
+ * 'active'. Must run inside the caller's transaction.
+ */
+export function clearContradictionLinks(id: string, actor = 'system'): void {
+  const db = getDb();
+  const mem = getMemoryById(id);
+  if (!mem || mem.contradicts.length === 0) return;
+  const now = nowIso();
+  for (const otherId of mem.contradicts) {
+    const other = getMemoryById(otherId);
+    if (!other) continue;
+    const remaining = other.contradicts.filter((x) => x !== id);
+    if (remaining.length === other.contradicts.length) continue;
+    const status = other.status === 'disputed' && remaining.length === 0 ? 'active' : other.status;
+    db.prepare(`UPDATE memories SET contradicts = ?, status = ?, updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(remaining), status, now, otherId);
+    appendEvent('memory.undisputed', 'memory', otherId, { conflict_partner_gone: id }, { actor });
+  }
+}
+
+/**
  * Correction = supersession, never in-place mutation of content.
  * The old memory stays (status 'superseded'), a new version replaces it,
  * and the ledger records the link.
+ *
+ * Provenance guard (like soul_remember): only a correction carrying the
+ * user's words (userEvidence) is booked as a user statement/user action;
+ * otherwise it is the agent's inference and booked as such.
  */
-export function correctMemory(id: string, newContent: string, actor = 'user'): CaptureResult {
+export function correctMemory(
+  id: string,
+  newContent: string,
+  opts: { userEvidence?: string } = {}
+): CaptureResult {
   const db = getDb();
   const old = getMemoryById(id);
   if (!old) {
     return { outcome: 'rejected', memory: null, reason: `Memory ${id} not found.`, conflicts: [] };
   }
+  const { actor, evidence } = provenanceActor(opts.userEvidence);
+  const asUser = actor === 'user';
   const result = capture({
     content: newContent,
     type: old.type,
     category: old.category,
     tags: old.tags,
     importance: old.importance,
-    confidence: Math.min(1.0, old.confidence + 0.1),
+    confidence: asUser ? Math.min(1.0, old.confidence + 0.1) : old.confidence,
     sensitivity: old.sensitivity,
     namespace: old.namespace,
-    sourceType: 'user_statement',
-    sourceRef: `correction_of:${id}`,
+    sourceType: asUser ? 'user_statement' : 'agent_inference',
+    sourceRef: `correction_of:${id}${evidence ? ` (${evidence.slice(0, 120)})` : ''}`,
     actor,
   });
   if (result.memory && result.outcome !== 'rejected') {
     const now = nowIso();
     const tx = db.transaction(() => {
+      clearContradictionLinks(id, actor);
       db.prepare(
         `UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?`
       ).run(result.memory!.id, now, id);
       db.prepare(`UPDATE memories SET supersedes = ? WHERE id = ?`).run(id, result.memory!.id);
       appendEvent('memory.superseded', 'memory', id, { superseded_by: result.memory!.id }, { actor });
-      appendEvent('memory.corrected', 'memory', result.memory!.id, { supersedes: id }, { actor });
+      appendEvent('memory.corrected', 'memory', result.memory!.id, {
+        supersedes: id,
+        ...(evidence ? { user_evidence: evidence } : {}),
+      }, { actor });
     });
     tx();
     result.memory = getMemoryById(result.memory.id);
@@ -373,19 +427,27 @@ export function correctMemory(id: string, newContent: string, actor = 'user'): C
 }
 
 /** Soft delete by default (state + ledger keep the tombstone); hard removes the row. */
-export function forgetMemory(id: string, opts: { hard?: boolean; actor?: string } = {}): boolean {
+export function forgetMemory(id: string, opts: { hard?: boolean; userEvidence?: string } = {}): boolean {
   const db = getDb();
   const mem = getMemoryById(id);
   if (!mem) return false;
-  const actor = opts.actor || 'user';
+  const { actor, evidence } = provenanceActor(opts.userEvidence);
   const tx = db.transaction(() => {
+    clearContradictionLinks(id, actor);
     if (opts.hard) {
       deleteVector(id); // FK cascade would also remove it; this keeps the cache honest
       db.prepare(`DELETE FROM memories WHERE id = ?`).run(id);
-      appendEvent('memory.deleted', 'memory', id, { hard: true, content_removed: true }, { actor });
+      appendEvent('memory.deleted', 'memory', id, {
+        hard: true,
+        content_removed: true,
+        ...(evidence ? { user_evidence: evidence } : {}),
+      }, { actor });
     } else {
       db.prepare(`UPDATE memories SET status = 'deleted', updated_at = ? WHERE id = ?`).run(nowIso(), id);
-      appendEvent('memory.deleted', 'memory', id, { hard: false }, { actor });
+      appendEvent('memory.deleted', 'memory', id, {
+        hard: false,
+        ...(evidence ? { user_evidence: evidence } : {}),
+      }, { actor });
     }
   });
   tx();

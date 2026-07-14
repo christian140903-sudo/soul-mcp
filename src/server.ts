@@ -55,7 +55,8 @@ export function createSoulServer(): McpServer {
         'description and your model id as model_hint. The capsule carries identity, goals, relevant ' +
         'memories (each with source and confidence) and possibly workbench assignments addressed to you.\n' +
         '2. Store substantial NEW facts via soul_remember. Set source_type honestly: user_statement only ' +
-        'for explicit statements, agent_inference for your own conclusions. Quality over quantity.\n' +
+        'for explicit statements (with source_ref citing the user\'s words), agent_inference for your own ' +
+        'conclusions — that is also the default. Quality over quantity.\n' +
         '3. Never treat a disputed memory as fact — ask, or present both sides.\n' +
         '4. If the capsule carries workbench assignments and the current task allows, think them through ' +
         'and answer via soul_resolve. Guards are enforced in code; your judgment is recorded as model_assisted.\n' +
@@ -80,7 +81,11 @@ export function createSoulServer(): McpServer {
         category: z.string().optional().describe('Category (preference, decision, learning, problem, solution, project, personal, technical, plan, health, financial, general). Auto-detected if omitted.'),
         tags: z.array(z.string()).optional(),
         importance: z.number().min(0).max(1).optional(),
-        source_type: z.enum(SOURCE_TYPES).optional().describe('Where this knowledge comes from. Defaults to user_statement.'),
+        source_type: z.enum(SOURCE_TYPES).optional().describe(
+          'Where this knowledge comes from. Defaults to agent_inference — the honest default for a tool ' +
+          'call. user_statement additionally requires source_ref pointing at the user\'s words (quote or ' +
+          'message reference); without it the write is stored as agent_inference.'
+        ),
         source_ref: z.string().optional().describe('Reference to the source (file, url, message id).'),
         namespace: z.string().optional().describe('Scope, e.g. a project name. Defaults to "default".'),
         valid_from: z.string().optional().describe('ISO date when the fact became true in the world (bitemporal).'),
@@ -88,13 +93,25 @@ export function createSoulServer(): McpServer {
       }),
     },
     async (input) => {
+      // Provenance guard: a tool call is the model writing, so the honest
+      // default is agent_inference. user_statement is only accepted with a
+      // source_ref citing the user's words — otherwise it is downgraded, and
+      // the response says so instead of silently minting user authority.
+      let sourceType: SourceType = (input.source_type as SourceType | undefined) ?? 'agent_inference';
+      let provenanceNote = '';
+      if (sourceType === 'user_statement' && !input.source_ref?.trim()) {
+        sourceType = 'agent_inference';
+        provenanceNote =
+          ' [provenance] Stored as agent_inference: user_statement requires source_ref citing the ' +
+          'user\'s words (quote or message reference).';
+      }
       const result = capture({
         content: input.content,
         type: input.type as MemoryType | undefined,
         category: input.category,
         tags: input.tags,
         importance: input.importance,
-        sourceType: input.source_type as SourceType | undefined,
+        sourceType,
         sourceRef: input.source_ref,
         namespace: input.namespace,
         validFrom: input.valid_from,
@@ -105,8 +122,9 @@ export function createSoulServer(): McpServer {
         outcome: result.outcome,
         id: result.memory?.id ?? null,
         status: result.memory?.status ?? null,
+        source_type: result.memory?.sourceType ?? null,
         conflicts: result.conflicts,
-        message: result.reason,
+        message: result.reason + provenanceNote,
       });
     }
   );
@@ -279,14 +297,25 @@ export function createSoulServer(): McpServer {
       title: 'Confirm Memory',
       description:
         'Confirm a candidate or disputed memory as true (user-verified). Confirmation raises confidence ' +
-        'and upgrades status. Use after the user explicitly validates the content.',
-      inputSchema: z.object({ id: z.string().describe('Memory id.') }),
+        'and upgrades status. Use after the user explicitly validates the content. Pass user_evidence ' +
+        '(the user\'s confirming words) so the ledger can book this as a user action — without it the ' +
+        'confirmation is applied but recorded as the agent\'s.',
+      inputSchema: z.object({
+        id: z.string().describe('Memory id.'),
+        user_evidence: z.string().optional().describe('Quote or reference of the user\'s explicit confirmation.'),
+      }),
     },
-    async ({ id }) => {
-      const memory = confirmMemory(id);
+    async ({ id, user_evidence }) => {
+      const memory = confirmMemory(id, { userEvidence: user_evidence });
       return jsonResult(
         memory
-          ? { confirmed: true, id, status: memory.status, confidence: memory.confidence }
+          ? {
+              confirmed: true,
+              id,
+              status: memory.status,
+              confidence: memory.confidence,
+              booked_as: user_evidence ? 'user' : 'agent',
+            }
           : { confirmed: false, message: `Memory ${id} not found.` }
       );
     }
@@ -298,19 +327,26 @@ export function createSoulServer(): McpServer {
       title: 'Correct Memory',
       description:
         'Correct a memory. The old version is kept as superseded (with the link), a new version replaces it. ' +
-        'History is never silently overwritten.',
+        'History is never silently overwritten. Pass user_evidence (the user\'s correcting words) so the ' +
+        'correction carries user authority — without it, it is stored as your inference.',
       inputSchema: z.object({
         id: z.string().describe('Memory id to correct.'),
         content: z.string().describe('The corrected content.'),
+        user_evidence: z.string().optional().describe('Quote or reference of the user\'s correction.'),
       }),
     },
-    async ({ id, content }) => {
-      const result = correctMemory(id, content);
+    async ({ id, content, user_evidence }) => {
+      const result = correctMemory(id, content, { userEvidence: user_evidence });
       return jsonResult({
         outcome: result.outcome,
         new_id: result.memory?.id ?? null,
+        source_type: result.memory?.sourceType ?? null,
         supersedes: id,
-        message: result.reason,
+        message:
+          result.reason +
+          (!user_evidence?.trim() && result.memory
+            ? ' [provenance] Stored as agent_inference: pass user_evidence to book a user correction.'
+            : ''),
       });
     }
   );
@@ -321,19 +357,23 @@ export function createSoulServer(): McpServer {
       title: 'Forget',
       description:
         'Forget a memory. Default is a soft delete: content stays out of every recall and context, but the ' +
-        'tombstone remains auditable. hard=true removes the row entirely (the ledger keeps only the deletion event).',
+        'tombstone remains auditable. hard=true removes the row entirely (the ledger keeps only the deletion ' +
+        'event). Pass user_evidence (the user\'s words asking for this) to book the deletion as a user ' +
+        'action — without it the ledger records the agent.',
       inputSchema: z.object({
         id: z.string(),
         hard: z.boolean().optional().describe('true = remove row entirely. Default false.'),
+        user_evidence: z.string().optional().describe('Quote or reference of the user\'s deletion request.'),
       }),
       annotations: { destructiveHint: true, openWorldHint: false },
     },
-    async ({ id, hard }) => {
-      const ok = forgetMemory(id, { hard });
+    async ({ id, hard, user_evidence }) => {
+      const ok = forgetMemory(id, { hard, userEvidence: user_evidence });
       return jsonResult({
         forgotten: ok,
         id,
         mode: hard ? 'hard' : 'soft',
+        booked_as: user_evidence?.trim() ? 'user' : 'agent',
         message: ok ? `Memory ${id} forgotten (${hard ? 'hard' : 'soft'}).` : `Memory ${id} not found.`,
       });
     }
@@ -359,25 +399,32 @@ export function createSoulServer(): McpServer {
       description:
         'Set or update an identity facet (name, preferred_language, role, timezone …). Facets carry ' +
         'confidence, evidence count and a status separating agent inference from user confirmation. ' +
-        'Set confirmed=true only when the user explicitly stated it.',
+        'confirmed=true additionally requires user_evidence (the user\'s words) — without it the facet ' +
+        'is stored as an observation, not a confirmation.',
       inputSchema: z.object({
         aspect: z.string(),
         value: z.string(),
         confidence: z.number().min(0).max(1).optional(),
-        confirmed: z.boolean().optional().describe('true only for explicit user statements.'),
+        confirmed: z.boolean().optional().describe('true only for explicit user statements — requires user_evidence.'),
+        user_evidence: z.string().optional().describe('Quote or reference of the user\'s explicit statement.'),
         namespace: z.string().optional(),
       }),
     },
-    async ({ aspect, value, confidence, confirmed, namespace }) => {
+    async ({ aspect, value, confidence, confirmed, user_evidence, namespace }) => {
       const facet = setIdentityFacet(aspect, value, {
         confidence,
         confirmed,
+        userEvidence: user_evidence,
         namespace,
-        sourceType: confirmed ? 'user_statement' : 'agent_inference',
       });
+      const downgraded = confirmed === true && !user_evidence?.trim();
       return jsonResult({
         identity: facet,
-        message: `${facet.aspect} = "${facet.value}" (${Math.round(facet.confidence * 100)}%, ${facet.status}, ${facet.evidence} evidence)`,
+        message:
+          `${facet.aspect} = "${facet.value}" (${Math.round(facet.confidence * 100)}%, ${facet.status}, ${facet.evidence} evidence)` +
+          (downgraded
+            ? ' [provenance] Stored as observed/agent_inference: confirmed=true requires user_evidence citing the user\'s words.'
+            : ''),
       });
     }
   );
@@ -424,7 +471,8 @@ export function createSoulServer(): McpServer {
       title: 'Goals & Commitments',
       description:
         'Manage goals and commitments. A commitment is a promise (usually with a due date) — Soul tracks it ' +
-        'separately from mere intentions. action=list also reports overdue commitments.',
+        'separately from mere intentions. action=list also reports overdue commitments. Pass user_evidence ' +
+        '(the user\'s words) when the user stated the goal/change — without it the ledger books the agent.',
       inputSchema: z.object({
         action: z.enum(['create', 'update', 'complete', 'list']),
         id: z.string().optional().describe('Goal id (for update/complete).'),
@@ -435,6 +483,7 @@ export function createSoulServer(): McpServer {
         progress: z.number().min(0).max(1).optional(),
         priority: z.number().min(1).max(5).optional(),
         due_at: z.string().optional().describe('ISO date.'),
+        user_evidence: z.string().optional().describe('Quote or reference of the user\'s words behind this change.'),
         namespace: z.string().optional(),
       }),
     },
@@ -449,8 +498,9 @@ export function createSoulServer(): McpServer {
             priority: input.priority,
             dueAt: input.due_at,
             namespace: input.namespace,
+            userEvidence: input.user_evidence,
           });
-          return jsonResult({ created: goal });
+          return jsonResult({ created: goal, booked_as: input.user_evidence?.trim() ? 'user' : 'agent' });
         }
         case 'update':
         case 'complete': {
@@ -462,8 +512,8 @@ export function createSoulServer(): McpServer {
             description: input.description,
             priority: input.priority,
             dueAt: input.due_at,
-          });
-          return jsonResult(goal ? { updated: goal } : { error: `Goal ${input.id} not found.` });
+          }, input.user_evidence);
+          return jsonResult(goal ? { updated: goal, booked_as: input.user_evidence?.trim() ? 'user' : 'agent' } : { error: `Goal ${input.id} not found.` });
         }
         case 'list': {
           const goals = listGoals({
@@ -560,7 +610,7 @@ export function createSoulServer(): McpServer {
     },
     async () => {
       const stats = getStats();
-      return jsonResult({ version: '2.0.0', sessions: getSessionCount(), ...stats });
+      return jsonResult({ version: SOUL_VERSION, sessions: getSessionCount(), ...stats });
     }
   );
 

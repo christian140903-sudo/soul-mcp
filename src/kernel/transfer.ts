@@ -27,6 +27,10 @@ export interface SoulExportV2 {
   goals: Goal[];
   events: Array<Record<string, unknown>>;
   meta: Record<string, string>;
+  /** since 3.0.1 — the detectors' long-term verdict memory travels with the soul */
+  workbench_decisions?: Array<Record<string, unknown>>;
+  /** since 3.0.1 — the calibration record travels with the soul */
+  predictions?: Array<Record<string, unknown>>;
 }
 
 export function exportAll(opts: { includeEvents?: boolean } = {}): SoulExportV2 {
@@ -54,7 +58,14 @@ export function exportAll(opts: { includeEvents?: boolean } = {}): SoulExportV2 
   const meta: Record<string, string> = {};
   for (const r of metaRows) meta[r.key] = r.value;
 
-  const body = { memories, identity, goals, events, meta };
+  const workbench_decisions = db
+    .prepare(`SELECT * FROM workbench_decisions ORDER BY created_at ASC`)
+    .all() as Array<Record<string, unknown>>;
+  const predictions = db
+    .prepare(`SELECT * FROM predictions ORDER BY created_at ASC`)
+    .all() as Array<Record<string, unknown>>;
+
+  const body = { memories, identity, goals, events, meta, workbench_decisions, predictions };
   const checksum = createHash('sha256').update(JSON.stringify(body)).digest('hex');
 
   appendEvent('data.exported', 'system', null, {
@@ -62,6 +73,8 @@ export function exportAll(opts: { includeEvents?: boolean } = {}): SoulExportV2 
     identity: identity.length,
     goals: goals.length,
     events: events.length,
+    workbench_decisions: workbench_decisions.length,
+    predictions: predictions.length,
   });
 
   return {
@@ -78,6 +91,8 @@ export interface ImportResult {
   identity: { imported: number; skipped: number };
   goals: { imported: number; skipped: number };
   events: { imported: number; skipped: number };
+  workbench_decisions: { imported: number; skipped: number };
+  predictions: { imported: number; skipped: number };
   checksumValid: boolean;
 }
 
@@ -86,13 +101,18 @@ export function importAll(data: SoulExportV2): ImportResult {
   if (data.format !== 'soul-passport') {
     throw new Error(`Unknown export format: ${(data as any).format ?? 'missing'}. Expected 'soul-passport'.`);
   }
-  const body = {
+  // The checksum body mirrors exactly the fields present in the file, so
+  // passports exported before 3.0.1 (without decisions/predictions) still
+  // verify against their original checksum.
+  const body: Record<string, unknown> = {
     memories: data.memories ?? [],
     identity: data.identity ?? [],
     goals: data.goals ?? [],
     events: data.events ?? [],
     meta: data.meta ?? {},
   };
+  if (data.workbench_decisions !== undefined) body.workbench_decisions = data.workbench_decisions;
+  if (data.predictions !== undefined) body.predictions = data.predictions;
   const checksumValid =
     data.checksum === createHash('sha256').update(JSON.stringify(body)).digest('hex');
 
@@ -101,6 +121,8 @@ export function importAll(data: SoulExportV2): ImportResult {
     identity: { imported: 0, skipped: 0 },
     goals: { imported: 0, skipped: 0 },
     events: { imported: 0, skipped: 0 },
+    workbench_decisions: { imported: 0, skipped: 0 },
+    predictions: { imported: 0, skipped: 0 },
     checksumValid,
   };
 
@@ -132,9 +154,27 @@ export function importAll(data: SoulExportV2): ImportResult {
     `INSERT INTO events (event_type, entity_type, entity_id, payload, actor, recorded_at, valid_from, valid_until)
      VALUES (?,?,?,?,?,?,?,?)`
   );
+  const decisionExists = db.prepare(`SELECT 1 FROM workbench_decisions WHERE id = ?`);
+  const insertDecision = db.prepare(
+    `INSERT INTO workbench_decisions
+       (id, kind, subject_key, subject_revision, outcome, terminal, next_review_at, assignment_id, actor, reasoning, created_at, invalidated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  );
+  const predictionExists = db.prepare(`SELECT 1 FROM predictions WHERE id = ?`);
+  const insertPrediction = db.prepare(
+    `INSERT INTO predictions (id, claim, probability, due_at, namespace, model_hint, created_at, resolved_at, outcome)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  );
+
+  const rows = {
+    memories: data.memories ?? [],
+    identity: data.identity ?? [],
+    goals: data.goals ?? [],
+    events: data.events ?? [],
+  };
 
   const tx = db.transaction(() => {
-    for (const m of body.memories) {
+    for (const m of rows.memories) {
       if (memExists.get(m.id)) {
         result.memories.skipped++;
         continue;
@@ -148,7 +188,7 @@ export function importAll(data: SoulExportV2): ImportResult {
       );
       result.memories.imported++;
     }
-    for (const f of body.identity) {
+    for (const f of rows.identity) {
       if (identityExists.get(f.aspect, f.namespace ?? 'default')) {
         result.identity.skipped++;
         continue;
@@ -159,7 +199,7 @@ export function importAll(data: SoulExportV2): ImportResult {
       );
       result.identity.imported++;
     }
-    for (const g of body.goals) {
+    for (const g of rows.goals) {
       if (goalExists.get(g.id)) {
         result.goals.skipped++;
         continue;
@@ -170,7 +210,7 @@ export function importAll(data: SoulExportV2): ImportResult {
       );
       result.goals.imported++;
     }
-    for (const e of body.events) {
+    for (const e of rows.events) {
       const entityId = (e.entity_id as string | null) ?? null;
       if (eventExists.get(e.recorded_at, e.event_type, entityId, entityId)) {
         result.events.skipped++;
@@ -181,6 +221,29 @@ export function importAll(data: SoulExportV2): ImportResult {
         e.recorded_at, e.valid_from ?? null, e.valid_until ?? null
       );
       result.events.imported++;
+    }
+    for (const d of (data.workbench_decisions ?? []) as any[]) {
+      if (decisionExists.get(d.id)) {
+        result.workbench_decisions.skipped++;
+        continue;
+      }
+      insertDecision.run(
+        d.id, d.kind, d.subject_key, d.subject_revision ?? null, d.outcome,
+        d.terminal ?? 0, d.next_review_at ?? null, d.assignment_id, d.actor ?? 'import',
+        d.reasoning ?? null, d.created_at, d.invalidated_at ?? null
+      );
+      result.workbench_decisions.imported++;
+    }
+    for (const p of (data.predictions ?? []) as any[]) {
+      if (predictionExists.get(p.id)) {
+        result.predictions.skipped++;
+        continue;
+      }
+      insertPrediction.run(
+        p.id, p.claim, p.probability, p.due_at ?? null, p.namespace ?? 'default',
+        p.model_hint ?? null, p.created_at, p.resolved_at ?? null, p.outcome ?? null
+      );
+      result.predictions.imported++;
     }
   });
   tx();

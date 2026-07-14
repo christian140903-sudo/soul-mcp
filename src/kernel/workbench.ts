@@ -22,7 +22,7 @@
 import { z } from 'zod';
 import { getDb } from './db.js';
 import { appendEvent } from './ledger.js';
-import { capture, getMemoryById, listDisputedPairs, type Memory } from './memory.js';
+import { capture, getMemoryById, listDisputedPairs, clearContradictionLinks, type Memory } from './memory.js';
 import { loadConstitution } from './policy.js';
 import { getVector, cosine } from './semantic.js';
 import { newId, nowIso, parseDuration } from '../util/core.js';
@@ -122,6 +122,83 @@ const INSTRUCTIONS: Record<AssignmentKind, string> = {
     'unanswerable (void), or is it genuinely still open? Your answer feeds the calibration record.',
 };
 
+// ─── Decision records (the detectors' memory of past verdicts) ───────
+
+/** Outcomes that settle a subject for good — never re-issued. */
+const TERMINAL_OUTCOMES = new Set([
+  'kept_separate', // merge_review: distinct information, judged once
+  'undisputed', // dispute: compatible — conflict link removed
+  'superseded', // dispute: loser superseded (state change would hide it anyway)
+  'merged', // merge_review: originals superseded
+  'retired', // low_confidence: memory expired
+  'expired', // stale_candidate: memory expired
+  'needs_user', // model CANNOT decide this; re-asking the model is pointless — the pair stays in the user review queue
+  'prediction_true',
+  'prediction_false',
+  'prediction_void',
+]);
+
+/** Cooldowns for non-terminal verdicts: the subject may return, later. */
+const COOLDOWN_MS: Record<string, number> = {
+  unclear: 30 * 86_400_000, // dispute judged undecidable — re-ask in a month
+  doubted: 30 * 86_400_000, // confidence lowered but still in the detector window
+  endorsed: 30 * 86_400_000, // confidence raised but possibly still <= threshold
+  recommended: 30 * 86_400_000, // waiting for the user's soul_confirm
+  still_open: 7 * 86_400_000, // prediction genuinely not judgeable yet
+};
+
+/** Sorted-id subject key: stable for pairs regardless of order. */
+function subjectKeyFor(memoryIds: string[]): string {
+  return [...memoryIds].sort().join('|');
+}
+
+function recordDecision(opts: {
+  kind: AssignmentKind;
+  subjectKey: string;
+  subjectRevision: string | null;
+  outcome: string;
+  assignmentId: string;
+  actor: string;
+  reasoning: string | null;
+}): void {
+  const terminal = TERMINAL_OUTCOMES.has(opts.outcome) ? 1 : 0;
+  const cooldown = terminal ? undefined : COOLDOWN_MS[opts.outcome];
+  const nextReviewAt = cooldown ? new Date(Date.now() + cooldown).toISOString() : null;
+  getDb()
+    .prepare(
+      `INSERT INTO workbench_decisions
+         (id, kind, subject_key, subject_revision, outcome, terminal, next_review_at, assignment_id, actor, reasoning, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      newId('wbd'),
+      opts.kind,
+      opts.subjectKey,
+      opts.subjectRevision,
+      opts.outcome,
+      terminal,
+      nextReviewAt,
+      opts.assignmentId,
+      opts.actor,
+      opts.reasoning,
+      nowIso()
+    );
+}
+
+/** True when the latest non-invalidated decision settles or snoozes the subject. */
+function decisionBlocks(kind: AssignmentKind, subjectKey: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT terminal, next_review_at FROM workbench_decisions
+       WHERE kind = ? AND subject_key = ? AND invalidated_at IS NULL
+       ORDER BY created_at DESC, id DESC LIMIT 1`
+    )
+    .get(kind, subjectKey) as { terminal: number; next_review_at: string | null } | undefined;
+  if (!row) return false;
+  if (row.terminal === 1) return true;
+  return row.next_review_at !== null && row.next_review_at > nowIso();
+}
+
 // ─── Issue assignments (deterministic detectors) ─────────────────────
 
 export function computeAssignments(opts: { maxNew?: number } = {}): AssignmentView[] {
@@ -134,6 +211,7 @@ export function computeAssignments(opts: { maxNew?: number } = {}): AssignmentVi
   const issue = (kind: AssignmentKind, memoryIds: string[]) => {
     if (issued >= maxNew) return;
     if (memoryIds.some((id) => covered.has(id))) return;
+    if (decisionBlocks(kind, subjectKeyFor(memoryIds))) return; // already judged (terminal or cooling down)
     const id = newId('wb');
     db.prepare(
       `INSERT INTO workbench_assignments (id, kind, memory_ids, instruction, status, issued_at)
@@ -299,21 +377,39 @@ export function resolveAssignment(assignmentId: string, resolution: unknown, act
       detail: `Resolution does not match the ${kind} schema: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
     };
   }
+  const reasoning: string | null = (parsed.data as any).reasoning ?? null;
+
   if (kind === 'prediction_due') {
     const predictionId: string = JSON.parse(row.memory_ids)[0];
+    const prediction = getPrediction(predictionId);
     const outcome = (parsed.data as any).outcome as 'true' | 'false' | 'void' | 'still_open';
     let result: ResolveResult;
-    if (outcome === 'still_open') {
-      result = { applied: true, outcome: 'still_open', detail: 'Noted; the prediction stays open and will return when due.' };
-    } else {
-      const resolved = resolvePrediction(predictionId, outcome, actor);
-      result = resolved
-        ? { applied: true, outcome: `prediction_${outcome}`, detail: `Prediction resolved as ${outcome}; the calibration record was updated.` }
-        : { applied: false, outcome: 'invalid', detail: 'Prediction gone or already resolved.' };
-    }
-    markAssignment(assignmentId, 'resolved', { ...(parsed.data as object), outcome: result.outcome });
-    appendEvent('workbench.resolved', 'system', assignmentId, { kind, resolution: parsed.data, outcome: result.outcome, applied: result.applied }, { actor });
-    return result;
+    // decision insert + state change + assignment close: one transaction
+    const tx = db.transaction(() => {
+      if (outcome === 'still_open') {
+        result = { applied: true, outcome: 'still_open', detail: 'Noted; the prediction stays open and returns after a cooldown.' };
+      } else {
+        const resolved = resolvePrediction(predictionId, outcome, actor);
+        result = resolved
+          ? { applied: true, outcome: `prediction_${outcome}`, detail: `Prediction resolved as ${outcome}; the calibration record was updated.` }
+          : { applied: false, outcome: 'invalid', detail: 'Prediction gone or already resolved.' };
+      }
+      markAssignment(assignmentId, result.applied ? 'resolved' : 'invalid', { ...(parsed.data as object), outcome: result.outcome });
+      if (result.applied) {
+        recordDecision({
+          kind,
+          subjectKey: predictionId,
+          subjectRevision: prediction?.createdAt ?? null,
+          outcome: result.outcome,
+          assignmentId,
+          actor,
+          reasoning,
+        });
+      }
+      appendEvent('workbench.resolved', 'system', assignmentId, { kind, resolution: parsed.data, outcome: result!.outcome, applied: result!.applied }, { actor });
+    });
+    tx();
+    return result!;
   }
 
   const memoryIds: string[] = JSON.parse(row.memory_ids);
@@ -323,15 +419,35 @@ export function resolveAssignment(assignmentId: string, resolution: unknown, act
     return { applied: false, outcome: 'invalid', detail: 'A referenced memory no longer exists.' };
   }
 
-  const result = applyResolution(kind, memories as Memory[], parsed.data, actor, assignmentId);
-  markAssignment(assignmentId, 'resolved', { ...(parsed.data as object), outcome: result.outcome });
-  appendEvent('workbench.resolved', 'system', assignmentId, {
-    kind,
-    resolution: parsed.data,
-    outcome: result.outcome,
-    applied: result.applied,
-  }, { actor });
-  return result;
+  // Everything downstream of the verdict — the memory-state change, the
+  // assignment close, the decision record — commits atomically, or not at all.
+  let result: ResolveResult;
+  const tx = db.transaction(() => {
+    result = applyResolution(kind, memories as Memory[], parsed.data, actor, assignmentId);
+    const settles = result.applied || result.outcome === 'needs_user';
+    if (settles) {
+      markAssignment(assignmentId, 'resolved', { ...(parsed.data as object), outcome: result.outcome });
+      recordDecision({
+        kind,
+        subjectKey: subjectKeyFor(memoryIds),
+        subjectRevision: (memories as Memory[]).map((m) => m.contentHash).sort().join('|'),
+        outcome: result.outcome,
+        assignmentId,
+        actor,
+        reasoning,
+      });
+    }
+    // a guard-rejected resolution (invalid_resolution, capture_failed) leaves
+    // the assignment open: nothing was applied, so nothing may look answered
+    appendEvent('workbench.resolved', 'system', assignmentId, {
+      kind,
+      resolution: parsed.data,
+      outcome: result.outcome,
+      applied: result.applied,
+    }, { actor });
+  });
+  tx();
+  return result!;
 }
 
 function applyResolution(
@@ -376,17 +492,15 @@ function applyResolution(
           };
         }
         const tx = db.transaction(() => {
+          clearContradictionLinks(loser.id, actor); // also frees third-party partners, not just this pair
           db.prepare(`UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?`)
             .run(current.id, now, loser.id);
-          const remaining = current.contradicts.filter((id) => id !== loser.id);
-          db.prepare(`UPDATE memories SET contradicts = ?, status = ?, updated_at = ? WHERE id = ?`)
-            .run(JSON.stringify(remaining), remaining.length > 0 ? 'disputed' : 'active', now, current.id);
           appendEvent('memory.superseded', 'memory', loser.id, { superseded_by: current.id, via: assignmentId, model_assisted: true }, { actor });
         });
         tx();
         return { applied: true, outcome: 'superseded', detail: `${loser.id} superseded by ${current.id} (kept, linked, reversible).` };
       }
-      return { applied: true, outcome: 'noted', detail: 'Recorded as unclear; the pair stays disputed.' };
+      return { applied: true, outcome: 'unclear', detail: 'Recorded as unclear; the pair stays disputed and returns after a cooldown.' };
     }
 
     case 'merge_review': {
@@ -414,6 +528,7 @@ function applyResolution(
       }
       const tx = db.transaction(() => {
         for (const m of [a, b]) {
+          clearContradictionLinks(m.id, actor);
           db.prepare(`UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?`)
             .run(captured.memory!.id, now, m.id);
           appendEvent('memory.superseded', 'memory', m.id, { superseded_by: captured.memory!.id, via: assignmentId, model_assisted: true }, { actor });
@@ -437,6 +552,7 @@ function applyResolution(
       if (m.sourceType === 'user_statement') {
         return { applied: false, outcome: 'needs_user', detail: 'Retiring a user statement needs the user (soul_forget).' };
       }
+      clearContradictionLinks(m.id, actor);
       db.prepare(`UPDATE memories SET status = 'expired', updated_at = ? WHERE id = ?`).run(now, m.id);
       appendEvent('memory.expired', 'memory', m.id, { reason: 'retired by model-assisted review', via: assignmentId }, { actor });
       return { applied: true, outcome: 'retired', detail: `${m.id} expired (tombstone kept).` };
@@ -455,6 +571,7 @@ function applyResolution(
       if (m.sourceType === 'user_statement') {
         return { applied: false, outcome: 'needs_user', detail: 'Expiring a user statement needs the user.' };
       }
+      clearContradictionLinks(m.id, actor);
       db.prepare(`UPDATE memories SET status = 'expired', updated_at = ? WHERE id = ?`).run(now, m.id);
       appendEvent('memory.expired', 'memory', m.id, { reason: 'model-assisted stale review', via: assignmentId }, { actor });
       return { applied: true, outcome: 'expired', detail: `${m.id} expired (tombstone kept).` };

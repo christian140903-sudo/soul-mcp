@@ -102,6 +102,116 @@ test('the default binary invocation serves MCP: initialize, list tools, call a t
   }
 });
 
+test('provenance guard: tool writes default to agent_inference; user_statement needs evidence; confirm is booked honestly', async () => {
+  const { child, request, notify } = rpcClient();
+  try {
+    await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    notify('notifications/initialized');
+
+    // 1. no source_type -> agent_inference, not user_statement
+    const bare = await request('tools/call', {
+      name: 'soul_remember',
+      arguments: { content: 'The starter cockpit will show backup age going forward' },
+    });
+    const barePayload = JSON.parse(bare.result.content[0].text);
+    assert.equal(barePayload.source_type, 'agent_inference', 'tool-call default must be agent_inference');
+
+    // 2. user_statement without source_ref -> downgraded, and the response says so
+    const claimed = await request('tools/call', {
+      name: 'soul_remember',
+      arguments: { content: 'User said they moved the vault to a new disk', source_type: 'user_statement' },
+    });
+    const claimedPayload = JSON.parse(claimed.result.content[0].text);
+    assert.equal(claimedPayload.source_type, 'agent_inference', 'unevidenced user_statement must be downgraded');
+    assert.ok(claimedPayload.message.includes('provenance'), 'downgrade must be stated, not silent');
+
+    // 3. user_statement with source_ref -> accepted
+    const evidenced = await request('tools/call', {
+      name: 'soul_remember',
+      arguments: {
+        content: 'User confirmed the Soul DB lives at ~/.soul/memories.db',
+        source_type: 'user_statement',
+        source_ref: 'chat:2026-07-14 "ja, die DB liegt unter ~/.soul"',
+      },
+    });
+    const evidencedPayload = JSON.parse(evidenced.result.content[0].text);
+    assert.equal(evidencedPayload.source_type, 'user_statement');
+
+    // 4. confirm without user_evidence applies, but the ledger books the agent
+    const confirmBare = await request('tools/call', {
+      name: 'soul_confirm',
+      arguments: { id: barePayload.id },
+    });
+    const confirmBarePayload = JSON.parse(confirmBare.result.content[0].text);
+    assert.equal(confirmBarePayload.confirmed, true);
+    assert.equal(confirmBarePayload.booked_as, 'agent');
+
+    // 5. confirm with user_evidence is booked as the user
+    const confirmUser = await request('tools/call', {
+      name: 'soul_confirm',
+      arguments: { id: evidencedPayload.id, user_evidence: 'User: "stimmt, bestätige ich"' },
+    });
+    const confirmUserPayload = JSON.parse(confirmUser.result.content[0].text);
+    assert.equal(confirmUserPayload.booked_as, 'user');
+
+    // 6. the ledger actors match what was booked
+    const timeline = await request('tools/call', {
+      name: 'soul_timeline',
+      arguments: { event_type: 'memory.confirmed' },
+    });
+    const events = JSON.parse(timeline.result.content[0].text).events;
+    const actors = new Map(events.map((e) => [e.entityId, e.actor]));
+    assert.equal(actors.get(barePayload.id), 'agent');
+    assert.equal(actors.get(evidencedPayload.id), 'user');
+
+    // 7. the review flow still works on a REAL candidate: sensitive content is
+    //    held, and confirming upgrades it (booked honestly either way)
+    const candidate = await request('tools/call', {
+      name: 'soul_remember',
+      arguments: { content: 'User monthly budget for tools is 150 euro', category: 'financial' },
+    });
+    const candidatePayload = JSON.parse(candidate.result.content[0].text);
+    assert.equal(candidatePayload.status, 'candidate', 'financial content is held as candidate');
+    const confirmCandidate = await request('tools/call', {
+      name: 'soul_confirm',
+      arguments: { id: candidatePayload.id },
+    });
+    const confirmCandidatePayload = JSON.parse(confirmCandidate.result.content[0].text);
+    assert.equal(confirmCandidatePayload.confirmed, true);
+    assert.equal(confirmCandidatePayload.status, 'confirmed', 'candidate upgraded despite agent booking');
+    assert.equal(confirmCandidatePayload.booked_as, 'agent');
+
+    // 8. identity: confirmed=true without user_evidence is downgraded and says so
+    const facet = await request('tools/call', {
+      name: 'soul_identity',
+      arguments: { aspect: 'favorite_shell', value: 'zsh', confirmed: true },
+    });
+    const facetPayload = JSON.parse(facet.result.content[0].text);
+    assert.equal(facetPayload.identity.status, 'observed', 'unevidenced confirmation downgraded');
+    assert.ok(facetPayload.message.includes('provenance'));
+    const facetEvidenced = await request('tools/call', {
+      name: 'soul_identity',
+      arguments: { aspect: 'favorite_shell', value: 'zsh', confirmed: true, user_evidence: 'User: "ich nutze zsh"' },
+    });
+    assert.equal(JSON.parse(facetEvidenced.result.content[0].text).identity.status, 'confirmed');
+
+    // 9. correct: without user_evidence the new memory is the agent's inference
+    const correction = await request('tools/call', {
+      name: 'soul_correct',
+      arguments: { id: evidencedPayload.id, content: 'User confirmed the Soul DB lives at ~/.soul/memories.db (WAL mode)' },
+    });
+    const correctionPayload = JSON.parse(correction.result.content[0].text);
+    assert.equal(correctionPayload.source_type, 'agent_inference');
+    assert.ok(correctionPayload.message.includes('provenance'));
+  } finally {
+    child.kill();
+  }
+});
+
 test('CLI mode still works when run with a command argument', async () => {
   const child = spawn(process.execPath, [join(root, 'dist/src/index.js'), 'status'], {
     env: { ...process.env, SOUL_DIR: mkdtempSync(join(tmpdir(), 'soul-test-cli-')) },

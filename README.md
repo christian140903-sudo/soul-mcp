@@ -15,6 +15,7 @@ claude mcp add soul -- npx -y soul-mcp
 - **v1 — it remembers.** Persistent memory across sessions.
 - **v2 — it can be trusted.** Event ledger, provenance on every fact, conflict detection instead of silent overwrites, a policy engine enforced in code, token-budgeted context capsules with receipts.
 - **v3 — it thinks.** Soul cannot reason — but a language model sits in front of it in every session. v3 turns that model into Soul's reasoning engine, and Soul into the model's accumulated self-knowledge. Both get better with every session. The loop is called the **Denkpartner protocol**.
+- **v3.0.1 — its verdicts stick, and its ledger cannot be fooled.** Found in a live audit (with GPT-5.6 as outside reviewer): workbench verdicts now persist in a `workbench_decisions` table, so a judged pair is never re-asked (terminal verdicts block forever, `unclear`/`doubt`/`still_open` carry cooldowns). And a hard provenance rule closes every path that could mint user authority: across **all six** user-authority tools (`remember`, `confirm`, `correct`, `forget`, `identity`, `goal`), the ledger actor `user` and `user_statement` provenance exist only together with `user_evidence` — a quote of the user's actual words. Without it the action still applies, honestly booked as the agent's. Passports now carry decisions and predictions; migration backups are WAL-safe (`VACUUM INTO` + `integrity_check`). 70 tests.
 
 ## What v3 adds, mechanism by mechanism
 

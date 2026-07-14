@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'crypto';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -11,18 +12,46 @@ const { capture } = await import('../dist/src/kernel/memory.js');
 const { setIdentityFacet } = await import('../dist/src/kernel/identity.js');
 const { createGoal } = await import('../dist/src/kernel/goals.js');
 const { exportAll, importAll, importV1Export } = await import('../dist/src/kernel/transfer.js');
+const { computeAssignments, resolveAssignment } = await import('../dist/src/kernel/workbench.js');
+const { makePrediction, resolvePrediction } = await import('../dist/src/kernel/cognition.js');
 const { closeDb, getDb } = await import('../dist/src/kernel/db.js');
 
 test('export -> import into empty soul is a faithful round-trip, and re-import is idempotent', () => {
-  // populate source
+  // populate source — including the detector memory and the calibration record
   const m1 = capture({ content: 'Round trip memory one about sqlite fidelity' });
   capture({ content: 'Round trip memory two about npm publishing' });
   setIdentityFacet('preferred_language', 'TypeScript', { confidence: 0.8 });
   createGoal({ title: 'Ship the passport format', kind: 'commitment', dueAt: '2031-05-05' });
+
+  // one resolved prediction (calibration) and one still open
+  const pDone = makePrediction({ claim: 'The passport test passes', probability: 0.85 });
+  resolvePrediction(pDone.id, 'true');
+  makePrediction({ claim: 'The starter ships this week', probability: 0.6, dueAt: '2031-01-01T00:00:00.000Z' });
+
+  // one cooldown decision (unclear) and one terminal decision (compatible)
+  const a = capture({ content: 'User prefers vim keybindings in every editor', type: 'preference', sourceType: 'agent_inference' });
+  const b = capture({ content: 'User prefers default keybindings in every editor', type: 'preference', sourceType: 'agent_inference' });
+  assert.ok(b.conflicts.length >= 1);
+  const dispute = computeAssignments().find((x) => x.kind === 'dispute' && x.memories.some((m) => m.id === a.memory.id));
+  assert.ok(dispute);
+  resolveAssignment(dispute.id, { verdict: 'unclear', reasoning: 'No way to tell from stored context alone.' });
+  const pair2a = capture({ content: 'User works standing desk mornings routine', type: 'preference', sourceType: 'agent_inference' });
+  const pair2b = capture({ content: 'User works standing desk evenings routine', type: 'preference', sourceType: 'agent_inference' });
+  assert.ok(pair2b.conflicts.length >= 1);
+  const d2 = computeAssignments().find((x) => x.kind === 'dispute' && x.memories.some((m) => m.id === pair2a.memory.id));
+  assert.ok(d2);
+  resolveAssignment(d2.id, { verdict: 'compatible', reasoning: 'Both can be true across different weeks.' });
+
   const data = exportAll();
   assert.ok(data.checksum);
   assert.ok(data.memories.length >= 2);
   assert.ok(data.events.length >= 2);
+  assert.equal(data.predictions.length, 2, 'predictions travel with the passport');
+  assert.ok(data.workbench_decisions.length >= 2, 'decisions travel with the passport');
+  const terminalDecision = data.workbench_decisions.find((d) => d.terminal === 1);
+  const cooldownDecision = data.workbench_decisions.find((d) => d.terminal === 0 && d.next_review_at);
+  assert.ok(terminalDecision, 'export contains a terminal decision');
+  assert.ok(cooldownDecision, 'export contains a cooldown decision');
 
   // switch to a brand-new soul dir
   closeDb();
@@ -34,6 +63,8 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   assert.equal(result.identity.imported, data.identity.length);
   assert.equal(result.goals.imported, data.goals.length);
   assert.equal(result.events.imported, data.events.length);
+  assert.equal(result.predictions.imported, 2);
+  assert.equal(result.workbench_decisions.imported, data.workbench_decisions.length);
 
   // fidelity: timestamps, counters, ids survive
   const row = getDb().prepare(`SELECT * FROM memories WHERE id = ?`).get(m1.memory.id);
@@ -41,12 +72,50 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   assert.equal(row.created_at, m1.memory.createdAt);
   assert.equal(row.access_count, m1.memory.accessCount);
 
+  // decision field fidelity, and the detector honors imported verdicts
+  const imp = getDb().prepare(`SELECT * FROM workbench_decisions WHERE id = ?`).get(terminalDecision.id);
+  assert.equal(imp.outcome, terminalDecision.outcome);
+  assert.equal(imp.subject_key, terminalDecision.subject_key);
+  assert.equal(imp.next_review_at, terminalDecision.next_review_at);
+  const reissued = computeAssignments().filter(
+    (x) => x.kind === 'dispute' && x.memories.some((m) => m.id === pair2a.memory.id)
+  );
+  assert.equal(reissued.length, 0, 'imported terminal decision blocks re-issue in the new soul');
+
+  // resolved prediction fidelity (calibration survives)
+  const pRow = getDb().prepare(`SELECT * FROM predictions WHERE id = ?`).get(pDone.id);
+  assert.equal(pRow.outcome, 'true');
+
   // idempotency: importing again changes nothing
   const again = importAll(data);
   assert.equal(again.memories.imported, 0);
   assert.equal(again.identity.imported, 0);
   assert.equal(again.goals.imported, 0);
   assert.equal(again.events.imported, 0);
+  assert.equal(again.predictions.imported, 0);
+  assert.equal(again.workbench_decisions.imported, 0);
+});
+
+test('a pre-3.0.1 passport (no decisions/predictions fields) still verifies its checksum', () => {
+  closeDb();
+  process.env.SOUL_DIR = mkdtempSync(join(tmpdir(), 'soul-test-transfer-legacy-'));
+  // constructed exactly as 3.0.0 exportAll() built it: five body fields, same order
+  const body = {
+    memories: [],
+    identity: [],
+    goals: [],
+    events: [],
+    meta: { soul_version: '3.0.0' },
+  };
+  const legacy = {
+    format: 'soul-passport',
+    version: '2.0.0',
+    exportedAt: '2026-07-13T00:00:00.000Z',
+    checksum: createHash('sha256').update(JSON.stringify(body)).digest('hex'),
+    ...body,
+  };
+  const result = importAll(legacy);
+  assert.equal(result.checksumValid, true, 'legacy checksum (without new fields) must verify');
 });
 
 test('tampered export fails the checksum but still imports with a warning flag', () => {

@@ -15,8 +15,8 @@ import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { nowIso, contentHash } from '../util/core.js';
 
-export const SCHEMA_VERSION = 5;
-export const SOUL_VERSION = '3.0.0';
+export const SCHEMA_VERSION = 6;
+export const SOUL_VERSION = '3.0.1';
 
 export function getSoulDir(): string {
   const dir = process.env.SOUL_DIR || join(homedir(), '.soul');
@@ -47,7 +47,10 @@ export function getDb(): Database.Database {
   const version = detectSchemaVersion(db);
   if (version < SCHEMA_VERSION) {
     if (existedBefore && version > 0) {
-      backupFile(dbPath, `pre-migration-v${version}-to-v${SCHEMA_VERSION}`);
+      // VACUUM INTO instead of a file copy: a plain copy of memories.db would
+      // miss committed data still sitting in the WAL sidecar. This snapshot
+      // is consistent by construction, and verified before we migrate.
+      backupVacuum(db, `pre-migration-v${version}-to-v${SCHEMA_VERSION}`);
     }
     migrate(db, version);
   }
@@ -71,13 +74,30 @@ export function backupFile(dbPath: string, label: string): string {
   return dest;
 }
 
-/** Live backup of the open database via VACUUM INTO (consistent snapshot). */
-export function backupLive(label = 'manual'): string {
-  const db = getDb();
+/**
+ * WAL-safe snapshot of an open database handle via VACUUM INTO, verified
+ * with integrity_check before it counts as a backup. Takes the handle
+ * explicitly so it is usable during getDb() itself (pre-migration).
+ */
+export function backupVacuum(db: Database.Database, label: string): string {
   const stamp = nowIso().replace(/[:.]/g, '-');
   const dest = join(getBackupDir(), `memories-${label}-${stamp}.db`);
   db.prepare(`VACUUM INTO ?`).run(dest);
+  const check = new Database(dest, { readonly: true });
+  try {
+    const result = check.pragma('integrity_check') as Array<{ integrity_check: string }>;
+    if (result[0]?.integrity_check !== 'ok') {
+      throw new Error(`Backup failed integrity_check: ${JSON.stringify(result)}`);
+    }
+  } finally {
+    check.close();
+  }
   return dest;
+}
+
+/** Live backup of the open database via VACUUM INTO (consistent snapshot). */
+export function backupLive(label = 'manual'): string {
+  return backupVacuum(getDb(), label);
 }
 
 /**
@@ -116,6 +136,9 @@ function migrate(db: Database.Database, from: number): void {
     }
     if (from < 5) {
       createV5Additions(db);
+    }
+    if (from < 6) {
+      createV6Additions(db);
     }
     const upsertMeta = db.prepare(
       `INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -303,6 +326,35 @@ function createV5Additions(db: Database.Database): void {
       outcome TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_predictions_open ON predictions(resolved_at) WHERE resolved_at IS NULL;
+  `);
+}
+
+/**
+ * v6: workbench decisions — the detectors' long-term memory of past verdicts.
+ * Without it, a resolved assignment (keep_separate, unclear, doubt, …) is
+ * re-issued on the next detector run because only the assignment closes, not
+ * the judgment. Terminal decisions block re-issue forever; non-terminal ones
+ * carry a next_review_at cooldown. subject_key is the sorted memory-id pair
+ * (or the single memory-/prediction-id); subject_revision records what the
+ * subject looked like when judged (content hashes), for later invalidation.
+ */
+function createV6Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workbench_decisions (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      subject_key TEXT NOT NULL,
+      subject_revision TEXT,
+      outcome TEXT NOT NULL,
+      terminal INTEGER NOT NULL DEFAULT 0,
+      next_review_at TEXT,
+      assignment_id TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT 'agent',
+      reasoning TEXT,
+      created_at TEXT NOT NULL,
+      invalidated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_wb_decisions_subject ON workbench_decisions(kind, subject_key);
   `);
 }
 

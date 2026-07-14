@@ -26,6 +26,12 @@ export interface Goal {
   updatedAt: string;
 }
 
+/** Same hard provenance rule as in memory.ts: 'user' only with real evidence. */
+function goalActor(userEvidence: string | undefined): { actor: 'user' | 'agent'; evidence?: string } {
+  const evidence = userEvidence?.trim() || undefined;
+  return evidence ? { actor: 'user', evidence } : { actor: 'agent' };
+}
+
 export function createGoal(input: {
   title: string;
   description?: string;
@@ -34,11 +40,12 @@ export function createGoal(input: {
   dueAt?: string;
   parentId?: string;
   namespace?: string;
-  actor?: string;
+  userEvidence?: string;
 }): Goal {
   const db = getDb();
   const id = newId('goal');
   const now = nowIso();
+  const { actor, evidence } = goalActor(input.userEvidence);
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO goals (id, title, description, kind, status, priority, progress, due_at, parent_id, namespace, created_at, updated_at)
@@ -55,7 +62,12 @@ export function createGoal(input: {
       now,
       now
     );
-    appendEvent('goal.created', 'goal', id, { title: input.title, kind: input.kind || 'goal', due_at: input.dueAt }, { actor: input.actor || 'user' });
+    appendEvent('goal.created', 'goal', id, {
+      title: input.title,
+      kind: input.kind || 'goal',
+      due_at: input.dueAt,
+      ...(evidence ? { user_evidence: evidence } : {}),
+    }, { actor });
   });
   tx();
   return getGoal(id)!;
@@ -64,13 +76,14 @@ export function createGoal(input: {
 export function updateGoal(
   id: string,
   updates: { status?: GoalStatus; progress?: number; title?: string; description?: string; priority?: number; dueAt?: string },
-  actor = 'user'
+  userEvidence?: string
 ): Goal | null {
   const db = getDb();
   const existing = getGoal(id);
   if (!existing) return null;
   const now = nowIso();
   const status = updates.status ?? existing.status;
+  const { actor, evidence } = goalActor(userEvidence);
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE goals SET title = ?, description = ?, status = ?, priority = ?, progress = ?, due_at = ?, updated_at = ? WHERE id = ?`
@@ -84,7 +97,10 @@ export function updateGoal(
       now,
       id
     );
-    appendEvent(status === 'completed' ? 'goal.completed' : 'goal.updated', 'goal', id, { ...updates }, { actor });
+    appendEvent(status === 'completed' ? 'goal.completed' : 'goal.updated', 'goal', id, {
+      ...updates,
+      ...(evidence ? { user_evidence: evidence } : {}),
+    }, { actor });
   });
   tx();
   return getGoal(id);
