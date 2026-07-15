@@ -53,6 +53,18 @@ export type SourceType =
   /** produced by the model working a workbench assignment (Denkpartner protocol) */
   | 'model_assisted';
 
+/** How fast a fact goes stale. Periodic/volatile facts get a review_due_at. */
+export type Volatility = 'stable' | 'periodic' | 'volatile';
+
+/** Review windows per volatility class (ms). */
+export const REVIEW_WINDOW_MS: Record<Exclude<Volatility, 'stable'>, number> = {
+  periodic: 180 * 86_400_000,
+  volatile: 30 * 86_400_000,
+};
+
+/** A single memory is a fact, not a document: 16 KB hard cap on content. */
+export const MAX_CONTENT_LENGTH = 16_384;
+
 export interface Memory {
   id: string;
   content: string;
@@ -78,6 +90,10 @@ export interface Memory {
   updatedAt: string;
   lastAccessedAt: string | null;
   version: number;
+  volatility: Volatility;
+  lastVerifiedAt: string | null;
+  reviewDueAt: string | null;
+  verificationRef: string | null;
 }
 
 export interface CaptureInput {
@@ -94,6 +110,10 @@ export interface CaptureInput {
   validFrom?: string;
   validUntil?: string;
   actor?: string;
+  /** stable (default) | periodic (~180d review) | volatile (~30d review) */
+  volatility?: Volatility;
+  /** source backing the fact's freshness (url, document, message ref) */
+  verificationRef?: string;
 }
 
 export interface CaptureResult {
@@ -111,6 +131,23 @@ export function capture(input: CaptureInput): CaptureResult {
   const content = input.content.trim();
   if (!content) {
     return { outcome: 'rejected', memory: null, reason: 'empty content', conflicts: [] };
+  }
+
+  // Hard size cap: a single memory is a fact, not a document. Unbounded content
+  // bloats the DB, the embedding, and can single-handedly consume a context
+  // capsule's whole budget. Reject over-large writes with a clear reason.
+  if (content.length > MAX_CONTENT_LENGTH) {
+    appendEvent('memory.rejected', 'memory', null, {
+      reason: 'content exceeds size cap',
+      length: content.length,
+      cap: MAX_CONTENT_LENGTH,
+    }, { actor });
+    return {
+      outcome: 'rejected',
+      memory: null,
+      reason: `Content is ${content.length} chars, over the ${MAX_CONTENT_LENGTH}-char cap for a single memory. Store a shorter fact, or split it.`,
+      conflicts: [],
+    };
   }
 
   // 1. Secrets are never stored. Only a redacted event remains.
@@ -185,6 +222,9 @@ export function capture(input: CaptureInput): CaptureResult {
 
   const id = newId('mem');
   const now = nowIso();
+  const volatility: Volatility = input.volatility ?? 'stable';
+  const reviewDueAt =
+    volatility === 'stable' ? null : new Date(Date.now() + REVIEW_WINDOW_MS[volatility]).toISOString();
   const memory: Memory = {
     id,
     content,
@@ -210,6 +250,10 @@ export function capture(input: CaptureInput): CaptureResult {
     updatedAt: now,
     lastAccessedAt: null,
     version: 1,
+    volatility,
+    lastVerifiedAt: volatility === 'stable' ? null : now,
+    reviewDueAt,
+    verificationRef: input.verificationRef || null,
   };
 
   const tx = db.transaction(() => {
@@ -340,6 +384,21 @@ export function confirmMemory(
     db.prepare(
       `UPDATE memories SET status = 'confirmed', confidence = MIN(1.0, confidence + 0.2), updated_at = ? WHERE id = ?`
     ).run(now, id);
+    // A user-evidenced confirmation of a volatile/periodic fact IS a
+    // verification: it renews the freshness window and re-arms the stale_fact
+    // detector (the earlier needs_user decision is invalidated so the fact
+    // returns when it goes stale again). This closes the loop the workbench
+    // opens with 'needs_user'.
+    if (evidence && mem.volatility !== 'stable') {
+      const nextDue = new Date(Date.now() + REVIEW_WINDOW_MS[mem.volatility as Exclude<Volatility, 'stable'>]).toISOString();
+      db.prepare(
+        `UPDATE memories SET last_verified_at = ?, review_due_at = ?, verification_ref = ? WHERE id = ?`
+      ).run(now, nextDue, `user:${evidence.slice(0, 120)}`, id);
+      db.prepare(
+        `UPDATE workbench_decisions SET invalidated_at = ? WHERE kind = 'stale_fact' AND subject_key = ? AND invalidated_at IS NULL`
+      ).run(now, id);
+      appendEvent('memory.verified', 'memory', id, { user_evidence: evidence, next_review: nextDue }, { actor });
+    }
     appendEvent('memory.confirmed', 'memory', id, {
       previous_status: mem.status,
       ...(evidence ? { user_evidence: evidence } : {}),
@@ -443,6 +502,12 @@ export function forgetMemory(id: string, opts: { hard?: boolean; userEvidence?: 
         ...(evidence ? { user_evidence: evidence } : {}),
       }, { actor });
     } else {
+      // Soft delete removes the content from every retrieval surface, not just
+      // the status-filtered recall: the memories_au trigger (v9) drops the FTS
+      // row on the status->'deleted' transition, and the vector is deleted here
+      // so it can no longer surface as a semantic neighbor (relatedMemories,
+      // semanticCandidates). The row itself stays as an auditable tombstone.
+      deleteVector(id);
       db.prepare(`UPDATE memories SET status = 'deleted', updated_at = ? WHERE id = ?`).run(nowIso(), id);
       appendEvent('memory.deleted', 'memory', id, {
         hard: false,
@@ -452,6 +517,47 @@ export function forgetMemory(id: string, opts: { hard?: boolean; userEvidence?: 
   });
   tx();
   return true;
+}
+
+/**
+ * Close the usage-feedback loop (v3.1): the model reports which capsule
+ * memories it actually used or found unhelpful. Unmentioned memories keep
+ * signal 'included' — unknown is NOT unhelpful. Feeds both the per-memory
+ * usage counters and the retrieval_impressions measurement base.
+ */
+export function applyMemoryFeedback(
+  contextId: string,
+  usedIds: string[] = [],
+  unhelpfulIds: string[] = []
+): { used: number; unhelpful: number; ignored: number } {
+  const db = getDb();
+  let used = 0;
+  let unhelpful = 0;
+  let ignored = 0;
+  // Feedback counts ONLY for memories this capsule actually delivered, and
+  // only once: the impression transitions included -> signal exactly one
+  // time, and the ranking counter moves only on a real transition. Ids the
+  // capsule never delivered (or repeated/overlapping feedback) are ignored,
+  // not silently booked — otherwise feedback could inflate arbitrary rows.
+  const upd = db.prepare(
+    `UPDATE retrieval_impressions SET signal = ? WHERE context_id = ? AND memory_id = ? AND signal = 'included'`
+  );
+  const tx = db.transaction(() => {
+    for (const id of new Set(usedIds)) {
+      if (upd.run('used', contextId, id).changes > 0) {
+        markUseful(id, true);
+        used++;
+      } else ignored++;
+    }
+    for (const id of new Set(unhelpfulIds)) {
+      if (upd.run('unhelpful', contextId, id).changes > 0) {
+        markUseful(id, false);
+        unhelpful++;
+      } else ignored++;
+    }
+  });
+  tx();
+  return { used, unhelpful, ignored };
 }
 
 export function markUseful(id: string, useful: boolean): boolean {
@@ -593,14 +699,16 @@ function insertMemoryRow(m: Memory): void {
       id, content, content_hash, type, category, tags, importance, confidence,
       sensitivity, status, namespace, source_type, source_ref, valid_from, valid_until,
       supersedes, superseded_by, contradicts, access_count, useful_count,
-      created_at, updated_at, last_accessed_at, version
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      created_at, updated_at, last_accessed_at, version,
+      volatility, last_verified_at, review_due_at, verification_ref
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).run(
     m.id, m.content, m.contentHash, m.type, m.category, JSON.stringify(m.tags),
     m.importance, m.confidence, m.sensitivity, m.status, m.namespace, m.sourceType,
     m.sourceRef, m.validFrom, m.validUntil, m.supersedes, m.supersededBy,
     JSON.stringify(m.contradicts), m.accessCount, m.usefulCount,
-    m.createdAt, m.updatedAt, m.lastAccessedAt, m.version
+    m.createdAt, m.updatedAt, m.lastAccessedAt, m.version,
+    m.volatility, m.lastVerifiedAt, m.reviewDueAt, m.verificationRef
   );
 }
 
@@ -630,6 +738,10 @@ export function rowToMemory(row: any): Memory {
     updatedAt: row.updated_at,
     lastAccessedAt: row.last_accessed_at,
     version: row.version,
+    volatility: row.volatility ?? 'stable',
+    lastVerifiedAt: row.last_verified_at ?? null,
+    reviewDueAt: row.review_due_at ?? null,
+    verificationRef: row.verification_ref ?? null,
   };
 }
 

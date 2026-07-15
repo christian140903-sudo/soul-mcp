@@ -7,6 +7,7 @@
  * capsule itself.
  */
 
+import { getDb } from './db.js';
 import { recall, type ScoredMemory } from './retrieval.js';
 import { getAllIdentity } from './identity.js';
 import { listGoals } from './goals.js';
@@ -15,7 +16,7 @@ import { getCalibration } from './cognition.js';
 import { loadConstitution, resolveModelProfile } from './policy.js';
 import { computeAssignments, openAssignmentViews, type AssignmentView } from './workbench.js';
 import { appendEvent } from './ledger.js';
-import { estimateTokens, parseDuration } from '../util/core.js';
+import { estimateTokens, parseDuration, newId, nowIso, contentHash } from '../util/core.js';
 
 export interface CapsuleItem {
   id: string;
@@ -24,9 +25,13 @@ export interface CapsuleItem {
   confidence: number;
   source: string;
   disputed?: boolean;
+  /** verification window elapsed — treat with care, verification pending */
+  stale?: boolean;
 }
 
 export interface ContextCapsule {
+  /** v3.1: handle for the feedback loop (soul_feedback / soul_reflect) */
+  context_id: string;
   task: string;
   token_budget: number;
   token_estimate: number;
@@ -42,13 +47,63 @@ export interface ContextCapsule {
   workbench?: AssignmentView[];
 }
 
+// ─── Client sessions (v3.1): which client/model is on the other side ──
+// One row per process lifetime; runtime model names live HERE, never in
+// durable memories. Started lazily on the first capsule compile.
+
+let currentClientSessionId: string | null = null;
+
+export function getCurrentClientSessionId(): string | null {
+  return currentClientSessionId;
+}
+
+function providerFromModel(modelId: string | null | undefined): string | null {
+  if (!modelId) return null;
+  const m = modelId.toLowerCase();
+  if (/claude|fable|opus|sonnet|haiku|mythos/.test(m)) return 'anthropic';
+  if (/gpt|codex|o[0-9]/.test(m)) return 'openai';
+  if (/gemini|flash/.test(m)) return 'google';
+  return null;
+}
+
+export function ensureClientSession(opts: { clientName?: string | null; modelHint?: string | null; modelProfile?: string | null }): string {
+  if (currentClientSessionId) return currentClientSessionId;
+  const id = newId('cs');
+  // client_name = the MCP client (e.g. "claude-code"); model_id ONLY from an
+  // explicit model hint — the two dimensions stay separate (a client name is
+  // not a model id).
+  getDb()
+    .prepare(
+      `INSERT INTO client_sessions (id, client_name, provider, model_id, model_profile, started_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, opts.clientName ?? null, providerFromModel(opts.modelHint), opts.modelHint ?? null, opts.modelProfile ?? null, nowIso());
+  appendEvent('session.started', 'system', id, { model_id: opts.modelHint ?? null, profile: opts.modelProfile ?? null }, {});
+  currentClientSessionId = id;
+  return id;
+}
+
+export function endClientSession(): void {
+  if (!currentClientSessionId) return;
+  getDb().prepare(`UPDATE client_sessions SET ended_at = ? WHERE id = ?`).run(nowIso(), currentClientSessionId);
+  appendEvent('session.ended', 'system', currentClientSessionId, {}, {});
+  currentClientSessionId = null;
+}
+
+/** Tests only: reset the module-level session so fresh SOUL_DIRs start clean. */
+export function _resetClientSessionForTests(): void {
+  currentClientSessionId = null;
+}
+
 export interface CompileOptions {
   tokenBudget?: number;
   namespace?: string;
   maxMemories?: number;
   actor?: string;
-  /** model id/name hint for the Denkpartner profile lookup (client name works as fallback) */
+  /** explicit model id/name hint for the Denkpartner profile lookup */
   modelHint?: string;
+  /** the MCP client's name (e.g. "claude-code") — kept separate from the model dimension */
+  clientName?: string;
 }
 
 /** Housekeeping runs at most once per hour per process, piggybacked on context compiles. */
@@ -65,6 +120,12 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
     const retentionMs = parseDuration(constitution.retention.candidate);
     if (retentionMs !== null) expireStaleCandidates(retentionMs);
     consolidateImportance();
+    // Impressions retention contract: measurement data, kept 90 days. Old
+    // rows have served their purpose (gold-set evaluation windows are weeks,
+    // not years) — this keeps the table bounded by time.
+    getDb()
+      .prepare(`DELETE FROM retrieval_impressions WHERE created_at < ?`)
+      .run(new Date(Date.now() - 90 * 86_400_000).toISOString());
   }
   const budget = Math.max(200, Math.min(opts.tokenBudget ?? 1800, 20000));
   const excludedSensitivity = new Set(constitution.recall.exclude_sensitivity_from_context);
@@ -109,13 +170,15 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
       continue;
     }
     remaining -= cost;
+    const stale = m.reviewDueAt !== null && m.reviewDueAt < nowIso();
     included.push({
       id: m.id,
       content: m.content,
-      reason: describeReason(m),
+      reason: describeReason(m) + (stale ? ' — STALE: verification window elapsed, treat with care' : ''),
       confidence: round2(m.confidence),
       source: m.sourceType + (m.sourceRef ? `:${m.sourceRef}` : ''),
       ...(m.disputed ? { disputed: true } : {}),
+      ...(stale ? { stale: true } : {}),
     });
   }
 
@@ -129,7 +192,9 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
       note: `"${truncate(p.a.content, 80)}" vs "${truncate(p.b.content, 80)}" — unresolved, do not treat either as fact`,
     }));
 
+  const contextId = newId('ctx');
   const capsule: ContextCapsule = {
+    context_id: contextId,
     task,
     token_budget: budget,
     token_estimate: budget - remaining,
@@ -141,10 +206,28 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
     excluded: { by_sensitivity: excludedBySensitivity, by_budget: excludedByBudget },
   };
 
+  // Retrieval impressions (v3.1): the measurement base for retrieval quality.
+  // Every delivered memory is recorded with its rank; feedback later flips
+  // the signal to used/unhelpful. Unmentioned stays 'included' (= unknown).
+  {
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO retrieval_impressions (id, context_id, query_hash, memory_id, rank, signal, created_at)
+       VALUES (?, ?, ?, ?, ?, 'included', ?)`
+    );
+    const qHash = contentHash(task).slice(0, 12);
+    const ts = nowIso();
+    const tx = db.transaction(() => {
+      included.forEach((item, i) => stmt.run(newId('imp'), contextId, qHash, item.id, i + 1, ts));
+    });
+    tx();
+  }
+
   // 6. Denkpartner protocol: attach briefing + open think-assignments when
   // the model profile allows it and the budget still has room.
-  const { name: profileName, profile } = resolveModelProfile(opts.modelHint);
+  const { name: profileName, profile } = resolveModelProfile(opts.modelHint ?? opts.clientName);
   capsule.model_profile = profileName;
+  ensureClientSession({ clientName: opts.clientName ?? null, modelHint: opts.modelHint ?? null, modelProfile: profileName });
   if (profile.max_workbench_assignments > 0) {
     // Self-igniting loop: compiling a capsule is the moment assignments are
     // (re)computed — a capable model gets work without ever asking for it.
@@ -170,7 +253,7 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
   }
 
   // 7. Receipt in the ledger: what was used, what was withheld, and why
-  appendEvent('context.compiled', 'system', null, {
+  appendEvent('context.compiled', 'system', contextId, {
     task,
     included: included.map((i) => i.id),
     excluded_by_sensitivity: excludedBySensitivity,

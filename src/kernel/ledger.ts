@@ -31,6 +31,9 @@ export type EventType =
   | 'session.reflected'
   | 'data.exported'
   | 'data.imported'
+  | 'import.memory_skipped'
+  | 'import.provenance_downgraded'
+  | 'import.section_skipped'
   | 'system.backup'
   | 'system.semantic'
   | 'memory.undisputed'
@@ -39,6 +42,10 @@ export type EventType =
   | 'prediction.made'
   | 'prediction.resolved'
   | 'deliberation.opened'
+  | 'deliberation.committed'
+  | 'memory.verified'
+  | 'session.started'
+  | 'session.ended'
   | 'memory.consolidated';
 
 export interface SoulEvent {

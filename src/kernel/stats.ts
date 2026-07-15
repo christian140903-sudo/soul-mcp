@@ -20,7 +20,16 @@ export interface SoulStats {
   oldestMemory: string | null;
   newestMemory: string | null;
   integrity: {
-    confirmed_share: number;
+    /** confirmed user statements / live user statements — NOT diluted by reflections */
+    user_statement_confirmation_rate: number;
+    /** live inferences that have been workbench-reviewed or confirmed */
+    inference_review_rate: number;
+    /** live memories with confidence >= 0.8 */
+    high_trust_share: number;
+    /** session reflections stored (separate table since 3.1, no longer memories) */
+    reflection_count: number;
+    /** live facts past their verification window */
+    freshness_due: number;
     disputed_count: number;
     quarantined_count: number;
     candidates_waiting: number;
@@ -58,6 +67,35 @@ export function getStats(): SoulStats {
     `SELECT COUNT(*) c FROM memories WHERE source_type IS NOT NULL AND source_type != ''`
   )).c;
 
+  // v3.1 split metrics: one confirmed_share hid three different truths
+  const liveUserStatements = (one<{ c: number }>(
+    `SELECT COUNT(*) c FROM memories WHERE source_type = 'user_statement' AND status IN ('active','confirmed','disputed')`
+  )).c;
+  const confirmedUserStatements = (one<{ c: number }>(
+    `SELECT COUNT(*) c FROM memories WHERE source_type = 'user_statement' AND status = 'confirmed'`
+  )).c;
+  const liveInferences = (one<{ c: number }>(
+    `SELECT COUNT(*) c FROM memories WHERE source_type = 'agent_inference' AND status IN ('active','confirmed','disputed')`
+  )).c;
+  const reviewedInferences = (one<{ c: number }>(
+    `SELECT COUNT(*) c FROM memories m WHERE m.source_type = 'agent_inference'
+     AND m.status IN ('active','confirmed','disputed')
+     AND (m.status = 'confirmed' OR EXISTS (
+       SELECT 1 FROM workbench_decisions d
+       WHERE d.subject_key = m.id OR d.subject_key LIKE '%' || m.id || '%'
+     ))`
+  )).c;
+  const highTrust = (one<{ c: number }>(
+    `SELECT COUNT(*) c FROM memories WHERE confidence >= 0.8 AND status IN ('active','confirmed','disputed')`
+  )).c;
+  const reflectionCount = (one<{ c: number }>(`SELECT COUNT(*) c FROM session_reflections`)).c;
+  // ISO-with-T timestamps compared against an ISO parameter — never against
+  // datetime('now') (space format), which misses same-day due facts
+  const freshnessDue = (db.prepare(
+    `SELECT COUNT(*) c FROM memories WHERE status IN ('active','confirmed')
+     AND review_due_at IS NOT NULL AND review_due_at < ?`
+  ).get(new Date().toISOString()) as { c: number }).c;
+
   return {
     totalMemories: total,
     byStatus,
@@ -71,7 +109,11 @@ export function getStats(): SoulStats {
     oldestMemory: (one<{ m: string | null }>(`SELECT MIN(created_at) m FROM memories`)).m,
     newestMemory: (one<{ m: string | null }>(`SELECT MAX(created_at) m FROM memories`)).m,
     integrity: {
-      confirmed_share: live > 0 ? round2((byStatus['confirmed'] || 0) / live) : 0,
+      user_statement_confirmation_rate: liveUserStatements > 0 ? round2(confirmedUserStatements / liveUserStatements) : 0,
+      inference_review_rate: liveInferences > 0 ? round2(reviewedInferences / liveInferences) : 0,
+      high_trust_share: live > 0 ? round2(highTrust / live) : 0,
+      reflection_count: reflectionCount,
+      freshness_due: freshnessDue,
       disputed_count: byStatus['disputed'] || 0,
       quarantined_count: byStatus['quarantined'] || 0,
       candidates_waiting: byStatus['candidate'] || 0,

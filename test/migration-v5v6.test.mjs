@@ -11,9 +11,13 @@ const soulDir = freshSoulDir('migration-v5v6');
 const { capture } = await import('../dist/src/kernel/memory.js');
 const { computeAssignments, resolveAssignment } = await import('../dist/src/kernel/workbench.js');
 const { makePrediction } = await import('../dist/src/kernel/cognition.js');
-const { getDb, closeDb } = await import('../dist/src/kernel/db.js');
+const { getDb, closeDb, SCHEMA_VERSION } = await import('../dist/src/kernel/db.js');
 
-test('a realistic v5 database (with live WAL content) migrates to v6 with a verified, restorable backup', () => {
+// NOTE: this is a VERSION-REWIND test, not a pristine-old-DB test: the file is
+// created on the current schema, then wound back (decisions table dropped,
+// version=5). It proves migration idempotency + WAL-safe backups + restore;
+// v7/v8 columns already exist and must be tolerated (addColumnIfMissing).
+test('version-rewind v5 state (with live WAL content) migrates forward with a verified, restorable backup', () => {
   // 1. Build real content on the current schema
   const a = capture({ content: 'User prefers sqlite for local persistence', type: 'preference', sourceType: 'agent_inference' });
   const b = capture({ content: 'User prefers postgres for local persistence', type: 'preference', sourceType: 'agent_inference' });
@@ -51,7 +55,7 @@ test('a realistic v5 database (with live WAL content) migrates to v6 with a veri
 
   // 3. Reopen through the kernel -> v5→v6 migration must run (holder still open)
   const db = getDb();
-  assert.equal(db.prepare(`SELECT value FROM meta WHERE key='schema_version'`).get().value, '6');
+  assert.equal(db.prepare(`SELECT value FROM meta WHERE key='schema_version'`).get().value, String(SCHEMA_VERSION));
   assert.ok(
     db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='workbench_decisions'`).get(),
     'workbench_decisions recreated by the migration'
@@ -61,8 +65,8 @@ test('a realistic v5 database (with live WAL content) migrates to v6 with a veri
   // 4. The pre-migration backup exists, passes integrity_check, and holds the
   //    exact v5 state — including the event that lived only in the WAL
   const backupDir = join(soulDir, 'backups');
-  const backups = readdirSync(backupDir).filter((f) => f.includes('pre-migration-v5-to-v6'));
-  assert.equal(backups.length, 1, `expected one v5→v6 backup, got: ${backups.join(', ')}`);
+  const backups = readdirSync(backupDir).filter((f) => f.includes('pre-migration-v5-to-v' + SCHEMA_VERSION));
+  assert.equal(backups.length, 1, `expected one v5 pre-migration backup, got: ${backups.join(', ')}`);
   const backupPath = join(backupDir, backups[0]);
   const bak = new Database(backupPath, { readonly: true });
   assert.equal(bak.pragma('integrity_check')[0].integrity_check, 'ok');
@@ -87,7 +91,7 @@ test('a realistic v5 database (with live WAL content) migrates to v6 with a veri
   copyFileSync(backupPath, join(restoreDir, 'memories.db'));
   process.env.SOUL_DIR = restoreDir;
   const restored = getDb();
-  assert.equal(restored.prepare(`SELECT value FROM meta WHERE key='schema_version'`).get().value, '6');
+  assert.equal(restored.prepare(`SELECT value FROM meta WHERE key='schema_version'`).get().value, String(SCHEMA_VERSION));
   assert.deepEqual(counted(restored), expected, 'restored database migrates cleanly with all rows');
 });
 

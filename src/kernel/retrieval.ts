@@ -126,6 +126,26 @@ export async function recall(query: string, opts: RecallOptions = {}): Promise<S
   const weights = queryVec ? WEIGHTS_HYBRID : WEIGHTS_LEXICAL;
   const now = Date.now();
 
+  // bm25 is unbounded and corpus-dependent; a fixed /10 divisor saturates on
+  // short docs / rare terms and flattens the lexical signal. Normalize the
+  // magnitudes min–max WITHIN this candidate set instead (same approach the
+  // semantic component already uses), so the strongest keyword match in the
+  // set maps to 1 and the weakest to 0. Falls back to a neutral 0.5 when the
+  // set has no spread. NULL = semantic-only row, 0 = LIKE fallback row: both
+  // keep their special handling below.
+  const bm25Mags: number[] = [];
+  for (const row of rows) {
+    if (row.bm25_rank !== null && Math.abs(row.bm25_rank) > 0) bm25Mags.push(Math.abs(row.bm25_rank));
+  }
+  const bmMin = bm25Mags.length ? Math.min(...bm25Mags) : 0;
+  const bmMax = bm25Mags.length ? Math.max(...bm25Mags) : 0;
+  const bmSpread = bmMax - bmMin;
+  const normalizeBm25 = (rank: number): number => {
+    const mag = Math.abs(rank);
+    if (bmSpread < 1e-9) return 0.5;
+    return (mag - bmMin) / bmSpread;
+  };
+
   // Raw cosines per candidate, first pass. e5 similarities are compressed —
   // on a single-topic corpus everything lands within a few hundredths of each
   // other and the absolute calibration alone barely discriminates. So the
@@ -162,7 +182,7 @@ export async function recall(query: string, opts: RecallOptions = {}): Promise<S
       row.bm25_rank === null
         ? 0
         : Math.abs(row.bm25_rank) > 0
-          ? Math.min(1, Math.abs(row.bm25_rank) / 10)
+          ? normalizeBm25(row.bm25_rank)
           : 0.3;
     const semantic = semanticComponent(m.id);
     const recency = 1 / (1 + Math.log1p(ageInDays / 30));
@@ -182,7 +202,9 @@ export async function recall(query: string, opts: RecallOptions = {}): Promise<S
     return { ...m, score, scoreParts, ageInDays: Math.round(ageInDays * 10) / 10, disputed: m.status === 'disputed' };
   });
 
-  scored.sort((a, b) => b.score - a.score);
+  // Deterministic order: score desc, then importance desc, then id asc — so a
+  // score tie resolves the same way on every process, not by DB row order.
+  scored.sort((a, b) => b.score - a.score || b.importance - a.importance || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const top = scored.slice(0, limit);
 
   if (!opts.silent && top.length > 0) {

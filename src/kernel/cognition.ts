@@ -39,6 +39,12 @@ export interface Prediction {
   createdAt: string;
   resolvedAt: string | null;
   outcome: 'true' | 'false' | 'void' | null;
+  /** v3.1 context fields — calibration per decision/domain/model becomes computable */
+  decisionId: string | null;
+  domain: string | null;
+  clientSessionId: string | null;
+  resolutionActor: string | null;
+  evidenceRef: string | null;
 }
 
 export function makePrediction(input: {
@@ -48,24 +54,36 @@ export function makePrediction(input: {
   namespace?: string;
   modelHint?: string;
   actor?: string;
+  decisionId?: string;
+  domain?: string;
+  clientSessionId?: string;
 }): Prediction {
   const db = getDb();
   const id = newId('pred');
   const now = nowIso();
   const probability = Math.max(0.01, Math.min(0.99, input.probability));
   db.prepare(
-    `INSERT INTO predictions (id, claim, probability, due_at, namespace, model_hint, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, input.claim.trim(), probability, input.dueAt ?? null, input.namespace ?? 'default', input.modelHint ?? null, now);
-  appendEvent('prediction.made', 'system', id, { claim: input.claim, probability, due_at: input.dueAt ?? null }, { actor: input.actor || 'agent' });
+    `INSERT INTO predictions (id, claim, probability, due_at, namespace, model_hint, created_at, decision_id, domain, client_session_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, input.claim.trim(), probability, input.dueAt ?? null, input.namespace ?? 'default',
+    input.modelHint ?? null, now, input.decisionId ?? null, input.domain ?? null, input.clientSessionId ?? null
+  );
+  appendEvent('prediction.made', 'system', id, { claim: input.claim, probability, due_at: input.dueAt ?? null, domain: input.domain ?? null }, { actor: input.actor || 'agent' });
   return getPrediction(id)!;
 }
 
-export function resolvePrediction(id: string, outcome: 'true' | 'false' | 'void', actor = 'agent'): Prediction | null {
+export function resolvePrediction(
+  id: string,
+  outcome: 'true' | 'false' | 'void',
+  actor = 'agent',
+  evidenceRef?: string
+): Prediction | null {
   const db = getDb();
   const p = getPrediction(id);
   if (!p || p.resolvedAt) return null;
-  db.prepare(`UPDATE predictions SET resolved_at = ?, outcome = ? WHERE id = ?`).run(nowIso(), outcome, id);
+  db.prepare(`UPDATE predictions SET resolved_at = ?, outcome = ?, resolution_actor = ?, evidence_ref = COALESCE(?, evidence_ref) WHERE id = ?`)
+    .run(nowIso(), outcome, actor, evidenceRef ?? null, id);
   appendEvent('prediction.resolved', 'system', id, { outcome, probability: p.probability }, { actor });
 
   // Surprise capture (ported from anima-kernel's consolidation): a badly
@@ -119,6 +137,11 @@ function rowToPrediction(row: any): Prediction {
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
     outcome: row.outcome,
+    decisionId: row.decision_id ?? null,
+    domain: row.domain ?? null,
+    clientSessionId: row.client_session_id ?? null,
+    resolutionActor: row.resolution_actor ?? null,
+    evidenceRef: row.evidence_ref ?? null,
   };
 }
 
@@ -162,13 +185,17 @@ export function getCalibration(): Calibration {
     }));
 
   const brier = round3(brierSum / rows.length);
-  let note: string | null = null;
+  let note: string | null;
   if (rows.length >= 5) {
     const worst = [...outBuckets].sort((a, b) => Math.abs(b.actual - b.predicted) - Math.abs(a.actual - a.predicted))[0];
     const drift = worst && Math.abs(worst.actual - worst.predicted) >= 0.15
       ? ` Largest gap: in the ${worst.range} band you predicted ~${Math.round(worst.predicted * 100)}% but hit ${Math.round(worst.actual * 100)}% (n=${worst.n}).`
       : '';
     note = `Calibration over ${rows.length} resolved predictions: Brier ${brier} (0 = perfect, 0.25 = coin flip).${drift}`;
+  } else {
+    // honest early-phase note instead of silence: the number exists, the
+    // sample does not yet support conclusions (bucket claims start at n>=5)
+    note = `Calibration: Brier ${brier} — provisional, n=${rows.length}; too small for conclusions yet.`;
   }
   return { resolved: rows.length, brier, buckets: outBuckets, note };
 }
@@ -219,6 +246,8 @@ const SCAFFOLDS: Record<DeliberationKind, string[]> = {
 };
 
 export interface Deliberation {
+  /** v3.1: the open loop's handle — close it with commitDeliberation */
+  deliberation_id: string;
   kind: DeliberationKind;
   problem: string;
   scaffold: string[];
@@ -229,14 +258,16 @@ export interface Deliberation {
 
 export async function deliberate(problem: string, kind?: DeliberationKind, namespace?: string): Promise<Deliberation> {
   const k: DeliberationKind = kind ?? inferKind(problem);
+  const id = newId('delib');
   const procedures = (
     await recall(problem, { type: 'procedural', limit: 3, namespace, silent: true })
   ).map((m) => ({ id: m.id, content: m.content, confidence: m.confidence }));
   const calibration = getCalibration().note;
 
-  appendEvent('deliberation.opened', 'system', null, { problem, kind: k }, { actor: 'agent' });
+  appendEvent('deliberation.opened', 'system', id, { problem, kind: k }, { actor: 'agent' });
 
   return {
+    deliberation_id: id,
     kind: k,
     problem,
     scaffold: SCAFFOLDS[k],
@@ -244,8 +275,53 @@ export async function deliberate(problem: string, kind?: DeliberationKind, names
     validated_procedures: procedures,
     note:
       'This scaffold is deterministic structure plus your own validated procedures — work the steps in your reasoning, ' +
-      'do not paste them back. Steps that produce testable claims should end in soul_predict.',
+      'do not paste them back. When decided, CLOSE the loop with soul_commit_deliberation(deliberation_id, verdict, ' +
+      'confidence) — an uncommitted deliberation is an open thought. Testable claims end in soul_predict.',
   };
+}
+
+/**
+ * Close a deliberation: record the verdict, its confidence and assumptions in
+ * the ledger. This is what makes the decision loop CLOSED — deliberating
+ * without committing leaves no trace of what was actually decided.
+ */
+export function commitDeliberation(input: {
+  deliberationId: string;
+  verdict: string;
+  confidence: number;
+  assumptions?: string[];
+  predictionIds?: string[];
+}): { committed: boolean; detail: string } {
+  const db = getDb();
+  let result: { committed: boolean; detail: string } = { committed: false, detail: '' };
+  // check + insert under a write lock taken UP FRONT (immediate): two
+  // processes cannot both pass the duplicate check — the second waits on the
+  // lock (busy_timeout) and then sees the first one's commit.
+  const tx = db.transaction(() => {
+    const opened = db
+      .prepare(`SELECT 1 FROM events WHERE event_type = 'deliberation.opened' AND entity_id = ? LIMIT 1`)
+      .get(input.deliberationId);
+    if (!opened) {
+      result = { committed: false, detail: `No deliberation ${input.deliberationId} in the ledger.` };
+      return;
+    }
+    const dup = db
+      .prepare(`SELECT 1 FROM events WHERE event_type = 'deliberation.committed' AND entity_id = ? LIMIT 1`)
+      .get(input.deliberationId);
+    if (dup) {
+      result = { committed: false, detail: 'Already committed.' };
+      return;
+    }
+    appendEvent('deliberation.committed', 'system', input.deliberationId, {
+      verdict: input.verdict,
+      confidence: Math.max(0, Math.min(1, input.confidence)),
+      assumptions: input.assumptions ?? [],
+      prediction_ids: input.predictionIds ?? [],
+    }, { actor: 'agent' });
+    result = { committed: true, detail: 'Deliberation closed; verdict and confidence recorded.' };
+  });
+  tx.immediate();
+  return result;
 }
 
 function inferKind(problem: string): DeliberationKind {

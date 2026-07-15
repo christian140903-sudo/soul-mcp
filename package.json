@@ -1,7 +1,7 @@
 {
   "name": "soul-mcp",
-  "version": "3.0.1",
-  "description": "A soul for your AI: trusted memory (provenance, ledger, policy-in-code) plus a thinking loop — the Denkpartner protocol — that turns any model into the memory's reasoning engine and feeds the model its own calibration record. Local-first, one MCP server.",
+  "version": "3.2.0",
+  "description": "A soul for your AI: trusted memory (provenance, ledger, policy-in-code) plus a thinking loop \u2014 the Denkpartner protocol \u2014 that turns any model into the memory's reasoning engine and feeds the model its own calibration record. Local-first, one MCP server.",
   "type": "module",
   "main": "dist/src/index.js",
   "bin": {
@@ -54,5 +54,6 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "mcpName": "io.github.christian140903-sudo/soul-mcp"
 }

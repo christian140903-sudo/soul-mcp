@@ -171,9 +171,14 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\bgh[pousr]_[A-Za-z0-9]{30,}\b/, 'github_token'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, 'slack_token'],
   [/\bnpm_[A-Za-z0-9]{30,}\b/, 'npm_token'],
+  [/\bAIza[0-9A-Za-z_-]{35}\b/, 'google_api_key'],
+  [/\bBearer\s+[A-Za-z0-9._-]{20,}/, 'bearer_token'],
   [/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/, 'jwt'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'private_key'],
-  [/\b(password|passwort|passwd)\s*(is|ist|[:=])\s*\S+/i, 'password'],
+  // 64-hex secret, but only with a nearby secret-ish keyword — bare hashes
+  // (git sha, checksum) are not secrets and must not be swept up.
+  [/\b(secret|token|key|api|passwd|password)\b[^\n]{0,40}\b[a-f0-9]{64}\b/i, 'hex_secret'],
+  [/\b(password|passwort|passwd)\s*(is|ist|lautet|[:=])\s*\S+/i, 'password'],
 ];
 
 export function detectSecret(content: string): string | null {

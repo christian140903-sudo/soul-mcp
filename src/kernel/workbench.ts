@@ -28,7 +28,7 @@ import { getVector, cosine } from './semantic.js';
 import { newId, nowIso, parseDuration } from '../util/core.js';
 import { getPrediction, resolvePrediction, listPredictions } from './cognition.js';
 
-export type AssignmentKind = 'dispute' | 'merge_review' | 'low_confidence' | 'stale_candidate' | 'prediction_due';
+export type AssignmentKind = 'dispute' | 'merge_review' | 'low_confidence' | 'stale_candidate' | 'prediction_due' | 'stale_fact';
 
 export interface Assignment {
   id: string;
@@ -84,6 +84,12 @@ const RESOLUTION_SCHEMAS: Record<AssignmentKind, z.ZodTypeAny> = {
   }),
   prediction_due: z.object({
     outcome: z.enum(['true', 'false', 'void', 'still_open']),
+    evidence_ref: z.string().optional().describe('Source backing the judged outcome.'),
+    reasoning: z.string().min(10),
+  }),
+  stale_fact: z.object({
+    action: z.enum(['still_valid', 'outdated', 'needs_user']),
+    evidence_ref: z.string().optional().describe('Source backing the verification (REQUIRED for still_valid).'),
     reasoning: z.string().min(10),
   }),
 };
@@ -101,6 +107,8 @@ function respondWith(kind: AssignmentKind): unknown {
       return { action: 'recommend_confirm | let_expire', reasoning: 'why' };
     case 'prediction_due':
       return { outcome: 'true | false | void | still_open', reasoning: 'what actually happened, with evidence' };
+    case 'stale_fact':
+      return { action: 'still_valid | outdated | needs_user', evidence_ref: '(source, for still_valid)', reasoning: 'why' };
   }
 }
 
@@ -120,6 +128,10 @@ const INSTRUCTIONS: Record<AssignmentKind, string> = {
   prediction_due:
     'This prediction is past due. Judge from what you know now: did it come true, come false, become ' +
     'unanswerable (void), or is it genuinely still open? Your answer feeds the calibration record.',
+  stale_fact:
+    'This fact is past its verification window (volatile/periodic knowledge goes stale). Check it against ' +
+    'fresh evidence: still_valid (cite evidence_ref), outdated (it no longer holds), or needs_user ' +
+    '(only the user can verify it).',
 };
 
 // ─── Decision records (the detectors' memory of past verdicts) ───────
@@ -251,6 +263,15 @@ export function computeAssignments(opts: { maxNew?: number } = {}): AssignmentVi
   for (const p of listPredictions({ open: true, dueBefore: nowIso(), limit: 5 })) {
     issue('prediction_due', [p.id]);
   }
+
+  // 6. Facts past their verification window (volatile/periodic knowledge)
+  const staleFacts = db
+    .prepare(
+      `SELECT id FROM memories WHERE status IN ('active','confirmed')
+       AND review_due_at IS NOT NULL AND review_due_at < ? ORDER BY review_due_at ASC LIMIT 5`
+    )
+    .all(nowIso()) as Array<{ id: string }>;
+  for (const row of staleFacts) issue('stale_fact', [row.id]);
 
   return openAssignmentViews();
 }
@@ -389,7 +410,7 @@ export function resolveAssignment(assignmentId: string, resolution: unknown, act
       if (outcome === 'still_open') {
         result = { applied: true, outcome: 'still_open', detail: 'Noted; the prediction stays open and returns after a cooldown.' };
       } else {
-        const resolved = resolvePrediction(predictionId, outcome, actor);
+        const resolved = resolvePrediction(predictionId, outcome, actor, (parsed.data as any).evidence_ref?.trim() || undefined);
         result = resolved
           ? { applied: true, outcome: `prediction_${outcome}`, detail: `Prediction resolved as ${outcome}; the calibration record was updated.` }
           : { applied: false, outcome: 'invalid', detail: 'Prediction gone or already resolved.' };
@@ -449,6 +470,9 @@ export function resolveAssignment(assignmentId: string, resolution: unknown, act
   tx();
   return result!;
 }
+
+/** Verification window per volatility class, for renewing review_due_at. */
+const VERIFY_WINDOW_MS: Record<string, number> = { periodic: 180 * 86_400_000, volatile: 30 * 86_400_000 };
 
 function applyResolution(
   kind: Exclude<AssignmentKind, 'prediction_due'>,
@@ -556,6 +580,48 @@ function applyResolution(
       db.prepare(`UPDATE memories SET status = 'expired', updated_at = ? WHERE id = ?`).run(now, m.id);
       appendEvent('memory.expired', 'memory', m.id, { reason: 'retired by model-assisted review', via: assignmentId }, { actor });
       return { applied: true, outcome: 'retired', detail: `${m.id} expired (tombstone kept).` };
+    }
+
+    case 'stale_fact': {
+      const m = memories[0]!;
+      // User-authority guard FIRST: a model never self-verifies or expires a
+      // user statement — every action on it goes to the user (soul_confirm
+      // with user_evidence renews the freshness window).
+      if (m.sourceType === 'user_statement' || resolution.action === 'needs_user') {
+        return {
+          applied: false,
+          outcome: 'needs_user',
+          detail:
+            'Verification needs the user — confirm with soul_confirm(user_evidence) to renew the ' +
+            'freshness window, or correct/forget it.',
+        };
+      }
+      if (resolution.action === 'still_valid') {
+        const evidence = (resolution.evidence_ref ?? '').trim();
+        if (!evidence) {
+          return {
+            applied: false,
+            outcome: 'invalid_resolution',
+            detail: 'still_valid requires evidence_ref — a verification without a source is a guess.',
+          };
+        }
+        const windowMs = VERIFY_WINDOW_MS[m.volatility] ?? VERIFY_WINDOW_MS['periodic']!;
+        const nextDue = new Date(Date.now() + windowMs).toISOString();
+        db.prepare(
+          `UPDATE memories SET last_verified_at = ?, review_due_at = ?, verification_ref = ?, updated_at = ? WHERE id = ?`
+        ).run(now, nextDue, evidence, now, m.id);
+        appendEvent('memory.verified', 'memory', m.id, {
+          via: assignmentId,
+          evidence_ref: evidence,
+          next_review: nextDue,
+        }, { actor });
+        return { applied: true, outcome: 'verified', detail: `${m.id} verified; next review ${nextDue.slice(0, 10)}.` };
+      }
+      // outdated, agent-sourced -> expire honestly (tombstone kept)
+      clearContradictionLinks(m.id, actor);
+      db.prepare(`UPDATE memories SET status = 'expired', updated_at = ? WHERE id = ?`).run(now, m.id);
+      appendEvent('memory.expired', 'memory', m.id, { reason: 'stale fact judged outdated', via: assignmentId }, { actor });
+      return { applied: true, outcome: 'expired', detail: `${m.id} expired as outdated (tombstone kept).` };
     }
 
     case 'stale_candidate': {

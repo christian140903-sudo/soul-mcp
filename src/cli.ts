@@ -104,7 +104,7 @@ async function status(): Promise<void> {
   console.log(`  Goals:       ${BOLD}${stats.totalGoals}${RESET}`);
   console.log(`  Identity:    ${BOLD}${stats.identityFacets}${RESET} facets`);
   console.log(`  Sessions:    ${BOLD}${getSessionCount()}${RESET}`);
-  console.log(`  Integrity:   confirmed ${stats.integrity.confirmed_share} · disputed ${stats.integrity.disputed_count} · stale(180d) ${stats.integrity.stale_share_180d} · provenance ${stats.integrity.provenance_coverage}`);
+  console.log(`  Integrity:   user-confirm ${stats.integrity.user_statement_confirmation_rate} · inference-review ${stats.integrity.inference_review_rate} · high-trust ${stats.integrity.high_trust_share} · disputed ${stats.integrity.disputed_count} · freshness-due ${stats.integrity.freshness_due}`);
   console.log(`  Semantic:    ${sem.configured ? (sem.available ? `${GREEN}on${RESET} ${DIM}(${sem.model}, ${sem.vectors} vectors, ${sem.missing} missing)${RESET}` : `${RED}configured but unavailable${RESET} ${DIM}(${sem.note})${RESET}`) : `${DIM}off — keyword search only. Enable: soul-mcp semantic on${RESET}`}`);
   console.log(`  Database:    ${CYAN}${getDbPath()}${RESET}`);
   console.log('');

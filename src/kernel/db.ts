@@ -15,8 +15,8 @@ import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { nowIso, contentHash } from '../util/core.js';
 
-export const SCHEMA_VERSION = 6;
-export const SOUL_VERSION = '3.0.1';
+export const SCHEMA_VERSION = 9;
+export const SOUL_VERSION = '3.2.0';
 
 export function getSoulDir(): string {
   const dir = process.env.SOUL_DIR || join(homedir(), '.soul');
@@ -43,6 +43,9 @@ export function getDb(): Database.Database {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  // Multiple MCP processes (Claude + Codex + starter pulse) share this file:
+  // wait for locks instead of failing fast.
+  db.pragma('busy_timeout = 5000');
 
   const version = detectSchemaVersion(db);
   if (version < SCHEMA_VERSION) {
@@ -139,6 +142,15 @@ function migrate(db: Database.Database, from: number): void {
     }
     if (from < 6) {
       createV6Additions(db);
+    }
+    if (from < 7) {
+      createV7Additions(db);
+    }
+    if (from < 8) {
+      createV8Additions(db);
+    }
+    if (from < 9) {
+      createV9Additions(db);
     }
     const upsertMeta = db.prepare(
       `INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -355,6 +367,108 @@ function createV6Additions(db: Database.Database): void {
       invalidated_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_wb_decisions_subject ON workbench_decisions(kind, subject_key);
+  `);
+}
+
+/**
+ * v7 (3.1.0), all additive:
+ * - fact freshness: volatility + verification fields on memories, so
+ *   "confirmed" stops meaning "confirmed forever" (stale_fact workbench type)
+ * - retrieval_impressions: which memories which capsule delivered, at what
+ *   rank, and what feedback came back — the measurement base for retrieval
+ *   work (measure BEFORE swapping models/rankers)
+ * - client_sessions: which client/model wrote what; runtime model names
+ *   belong here, never inside durable memories
+ * - prediction context fields: decision linkage, domain, session, resolution
+ *   provenance — calibration per model family × domain becomes computable
+ * - session_reflections: session summaries leave the memories table so they
+ *   stop flooding integrity metrics
+ */
+function addColumnIfMissing(db: Database.Database, table: string, column: string, ddl: string): void {
+  const cols = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
+function createV7Additions(db: Database.Database): void {
+  addColumnIfMissing(db, 'memories', 'volatility', `volatility TEXT NOT NULL DEFAULT 'stable'`);
+  addColumnIfMissing(db, 'memories', 'last_verified_at', 'last_verified_at TEXT');
+  addColumnIfMissing(db, 'memories', 'review_due_at', 'review_due_at TEXT');
+  addColumnIfMissing(db, 'memories', 'verification_ref', 'verification_ref TEXT');
+  addColumnIfMissing(db, 'predictions', 'decision_id', 'decision_id TEXT');
+  addColumnIfMissing(db, 'predictions', 'domain', 'domain TEXT');
+  addColumnIfMissing(db, 'predictions', 'client_session_id', 'client_session_id TEXT');
+  addColumnIfMissing(db, 'predictions', 'resolution_actor', 'resolution_actor TEXT');
+  addColumnIfMissing(db, 'predictions', 'evidence_ref', 'evidence_ref TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_memories_review_due ON memories(review_due_at) WHERE review_due_at IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS retrieval_impressions (
+      id TEXT PRIMARY KEY,
+      context_id TEXT NOT NULL,
+      query_hash TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      rank INTEGER NOT NULL,
+      signal TEXT NOT NULL DEFAULT 'included',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_impressions_context ON retrieval_impressions(context_id);
+    CREATE INDEX IF NOT EXISTS idx_impressions_memory ON retrieval_impressions(memory_id);
+
+    CREATE TABLE IF NOT EXISTS client_sessions (
+      id TEXT PRIMARY KEY,
+      client_name TEXT,
+      provider TEXT,
+      model_id TEXT,
+      model_profile TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS session_reflections (
+      id TEXT PRIMARY KEY,
+      session_number INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      learnings_count INTEGER NOT NULL DEFAULT 0,
+      client_session_id TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
+/** v8: created_at index for the impressions retention sweep (90-day window). */
+function createV8Additions(db: Database.Database): void {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_impressions_created ON retrieval_impressions(created_at);`);
+}
+
+/**
+ * v9 (3.1.1): a soft delete must keep content out of the FTS index, not just
+ * out of the status-filtered recall projection. Before v9 the memories_au
+ * trigger re-indexed the row on EVERY update, so a soft-deleted memory stayed
+ * fully searchable in memories_fts and any later UPDATE re-inserted it. The
+ * trigger is redefined to only (re)index rows whose new status is not
+ * 'deleted'; a status->'deleted' transition removes the FTS row. Existing
+ * soft-deleted rows are purged from the index once here.
+ */
+function createV9Additions(db: Database.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS memories_au;
+    CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+      -- Only remove the OLD row from the index if it was actually indexed
+      -- (status != 'deleted'). A double 'delete' against an external-content
+      -- fts5 index corrupts it, so an UPDATE on an already-deleted row must be
+      -- a no-op for FTS.
+      INSERT INTO memories_fts(memories_fts, rowid, content, category, tags)
+      SELECT 'delete', old.rowid, old.content, old.category, old.tags
+      WHERE old.status != 'deleted';
+      -- (Re)index the NEW row only while it is live.
+      INSERT INTO memories_fts(rowid, content, category, tags)
+      SELECT new.rowid, new.content, new.category, new.tags
+      WHERE new.status != 'deleted';
+    END;
+
+    -- Purge content of already soft-deleted rows from the index (one-time backfill).
+    INSERT INTO memories_fts(memories_fts, rowid, content, category, tags)
+    SELECT 'delete', rowid, content, category, tags FROM memories WHERE status = 'deleted';
   `);
 }
 

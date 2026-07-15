@@ -23,9 +23,13 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   setIdentityFacet('preferred_language', 'TypeScript', { confidence: 0.8 });
   createGoal({ title: 'Ship the passport format', kind: 'commitment', dueAt: '2031-05-05' });
 
-  // one resolved prediction (calibration) and one still open
-  const pDone = makePrediction({ claim: 'The passport test passes', probability: 0.85 });
-  resolvePrediction(pDone.id, 'true');
+  // one resolved prediction (calibration) and one still open — all v7
+  // context fields non-empty so the round-trip proves every column
+  const pDone = makePrediction({
+    claim: 'The passport test passes', probability: 0.85,
+    decisionId: 'delib_rt1', domain: 'code', clientSessionId: 'cs_rt',
+  });
+  resolvePrediction(pDone.id, 'true', 'agent', 'test-run evidence');
   makePrediction({ claim: 'The starter ships this week', probability: 0.6, dueAt: '2031-01-01T00:00:00.000Z' });
 
   // one cooldown decision (unclear) and one terminal decision (compatible)
@@ -42,11 +46,17 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   assert.ok(d2);
   resolveAssignment(d2.id, { verdict: 'compatible', reasoning: 'Both can be true across different weeks.' });
 
+  // v3.1: diary + client sessions travel too
+  getDb().prepare("INSERT INTO session_reflections (id, session_number, summary, learnings_count, created_at) VALUES ('sref_rt', 1, 'roundtrip summary', 0, ?)").run(new Date().toISOString());
+  getDb().prepare("INSERT INTO client_sessions (id, client_name, provider, model_id, started_at) VALUES ('cs_rt', 'claude-code', 'anthropic', 'claude-fable-5', ?)").run(new Date().toISOString());
+
   const data = exportAll();
   assert.ok(data.checksum);
   assert.ok(data.memories.length >= 2);
   assert.ok(data.events.length >= 2);
   assert.equal(data.predictions.length, 2, 'predictions travel with the passport');
+  assert.equal(data.session_reflections.length, 1, 'diary travels with the passport');
+  assert.ok(data.client_sessions.length >= 1, 'client sessions travel with the passport');
   assert.ok(data.workbench_decisions.length >= 2, 'decisions travel with the passport');
   const terminalDecision = data.workbench_decisions.find((d) => d.terminal === 1);
   const cooldownDecision = data.workbench_decisions.find((d) => d.terminal === 0 && d.next_review_at);
@@ -82,9 +92,16 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   );
   assert.equal(reissued.length, 0, 'imported terminal decision blocks re-issue in the new soul');
 
-  // resolved prediction fidelity (calibration survives)
+  // resolved prediction fidelity (calibration survives) — including v7 fields
   const pRow = getDb().prepare(`SELECT * FROM predictions WHERE id = ?`).get(pDone.id);
   assert.equal(pRow.outcome, 'true');
+  assert.equal(pRow.resolution_actor, 'agent', 'v7 prediction fields survive the round-trip');
+  assert.equal(pRow.decision_id, 'delib_rt1');
+  assert.equal(pRow.domain, 'code');
+  assert.equal(pRow.client_session_id, 'cs_rt');
+  assert.equal(pRow.evidence_ref, 'test-run evidence');
+  assert.equal(getDb().prepare(`SELECT summary FROM session_reflections WHERE id = 'sref_rt'`).get().summary, 'roundtrip summary');
+  assert.equal(getDb().prepare(`SELECT model_id FROM client_sessions WHERE id = 'cs_rt'`).get().model_id, 'claude-fable-5');
 
   // idempotency: importing again changes nothing
   const again = importAll(data);
@@ -94,6 +111,8 @@ test('export -> import into empty soul is a faithful round-trip, and re-import i
   assert.equal(again.events.imported, 0);
   assert.equal(again.predictions.imported, 0);
   assert.equal(again.workbench_decisions.imported, 0);
+  assert.equal(again.session_reflections.imported, 0);
+  assert.equal(again.client_sessions.imported, 0);
 });
 
 test('a pre-3.0.1 passport (no decisions/predictions fields) still verifies its checksum', () => {
@@ -118,7 +137,7 @@ test('a pre-3.0.1 passport (no decisions/predictions fields) still verifies its 
   assert.equal(result.checksumValid, true, 'legacy checksum (without new fields) must verify');
 });
 
-test('tampered export fails the checksum but still imports with a warning flag', () => {
+test('tampered export fails the checksum and the import is refused (3.1.1)', () => {
   closeDb();
   process.env.SOUL_DIR = mkdtempSync(join(tmpdir(), 'soul-test-transfer-tamper-'));
   capture({ content: 'memory in the tamper test soul' });
@@ -126,8 +145,12 @@ test('tampered export fails the checksum but still imports with a warning flag',
   data.memories[0].content = 'silently edited content';
   closeDb();
   process.env.SOUL_DIR = mkdtempSync(join(tmpdir(), 'soul-test-transfer-tamper-dest-'));
-  const result = importAll(data);
-  assert.equal(result.checksumValid, false);
+  // A checksum mismatch now REFUSES the import instead of importing with a flag:
+  // an import that trusts ids/provenance/status verbatim must not run on
+  // unverified data.
+  assert.throws(() => importAll(data), /checksum does not verify/i);
+  // and nothing was written
+  assert.equal(getDb().prepare(`SELECT COUNT(*) c FROM memories`).get().c, 0, 'refused import writes nothing');
 });
 
 test('legacy v1 exports import through the capture pipeline', () => {

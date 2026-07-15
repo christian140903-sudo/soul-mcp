@@ -15,8 +15,9 @@ import { fileURLToPath } from 'url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function rpcClient() {
+  const soulDir = mkdtempSync(join(tmpdir(), 'soul-test-server-'));
   const child = spawn(process.execPath, [join(root, 'dist/src/index.js')], {
-    env: { ...process.env, SOUL_DIR: mkdtempSync(join(tmpdir(), 'soul-test-server-')) },
+    env: { ...process.env, SOUL_DIR: soulDir },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let buffer = '';
@@ -51,7 +52,7 @@ function rpcClient() {
   const notify = (method, params = {}) => {
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
   };
-  return { child, request, notify };
+  return { child, request, notify, soulDir };
 }
 
 test('the default binary invocation serves MCP: initialize, list tools, call a tool', async () => {
@@ -209,6 +210,122 @@ test('provenance guard: tool writes default to agent_inference; user_statement n
     assert.ok(correctionPayload.message.includes('provenance'));
   } finally {
     child.kill();
+  }
+});
+
+test('evidence_ref flows through the public MCP path: predict -> workbench -> resolve', async () => {
+  const { child, request, notify, soulDir } = rpcClient();
+  try {
+    await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    notify('notifications/initialized');
+
+    const made = await request('tools/call', {
+      name: 'soul_predict',
+      arguments: { claim: 'The MCP evidence path works', probability: 0.9, due_at: '2026-01-01T00:00:00.000Z', domain: 'code' },
+    });
+    const predId = JSON.parse(made.result.content[0].text).id;
+
+    const wb = await request('tools/call', { name: 'soul_workbench', arguments: {} });
+    const assignments = JSON.parse(wb.result.content[0].text).assignments;
+    const due = assignments.find((a) => a.kind === 'prediction_due' && a.prediction?.id === predId);
+    assert.ok(due, 'due prediction surfaced through the workbench');
+
+    const resolved = await request('tools/call', {
+      name: 'soul_resolve',
+      arguments: {
+        assignment_id: due.id,
+        resolution: { outcome: 'true', evidence_ref: 'test/server.test.mjs run', reasoning: 'The test itself demonstrates the path end to end.' },
+      },
+    });
+    assert.equal(JSON.parse(resolved.result.content[0].text).applied, true);
+
+    // verify the persisted column directly in the server's database
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(join(soulDir, 'memories.db'), { readonly: true });
+    const row = db.prepare('SELECT evidence_ref, resolution_actor, domain FROM predictions WHERE id = ?').get(predId);
+    db.close();
+    assert.equal(row.evidence_ref, 'test/server.test.mjs run');
+    assert.equal(row.resolution_actor, 'agent');
+    assert.equal(row.domain, 'code');
+  } finally {
+    child.kill();
+  }
+});
+
+test('soul_reflect summary reaches the timeline as session.reflected and survives an export/import roundtrip', async () => {
+  const source = rpcClient();
+  let passport;
+  const summary = 'Closed the 3.2.0 audit round: import screening, fail-closed checksum, forget clears FTS.';
+  try {
+    await source.request('initialize', {
+      protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    source.notify('notifications/initialized');
+
+    // soul_reflect(summary) writes the diary entry + the session.reflected event
+    const reflect = await source.request('tools/call', {
+      name: 'soul_reflect',
+      arguments: { summary, learnings: ['Fail-closed beats fail-open for untrusted imports.'] },
+    });
+    assert.equal(JSON.parse(reflect.result.content[0].text).summary_stored, true);
+
+    // soul_timeline shows the event with the same summary payload
+    const timeline = await source.request('tools/call', {
+      name: 'soul_timeline', arguments: { event_type: 'session.reflected' },
+    });
+    const events = JSON.parse(timeline.result.content[0].text).events;
+    assert.equal(events.length, 1, 'exactly one session.reflected event');
+    const reflected = events[0];
+    assert.equal(reflected.eventType, 'session.reflected');
+    assert.equal(reflected.payload.summary, summary, 'timeline carries the same summary payload');
+    const reflectionId = reflected.entityId; // the session_reflections id
+
+    // export the whole soul
+    const exported = await source.request('tools/call', { name: 'soul_export', arguments: {} });
+    passport = exported.result.content[0].text;
+
+    // sanity: the diary entry is in the passport under its id
+    const parsed = JSON.parse(passport);
+    assert.ok(parsed.session_reflections.some((r) => r.id === reflectionId && r.summary === summary),
+      'reflection travels in the passport with its id');
+  } finally {
+    source.child.kill();
+  }
+
+  // import into a brand-new soul and confirm the reflection id is preserved
+  const dest = rpcClient();
+  try {
+    await dest.request('initialize', {
+      protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    dest.notify('notifications/initialized');
+
+    const imported = await dest.request('tools/call', { name: 'soul_import', arguments: { data: passport } });
+    const importPayload = JSON.parse(imported.result.content[0].text);
+    assert.equal(importPayload.success, true, 'valid passport imports');
+    assert.ok(importPayload.session_reflections.imported >= 1, 'the reflection is imported');
+
+    // the same session.reflected event, same summary, same reflection id is on the new timeline
+    const timeline2 = await dest.request('tools/call', {
+      name: 'soul_timeline', arguments: { event_type: 'session.reflected' },
+    });
+    const events2 = JSON.parse(timeline2.result.content[0].text).events;
+    const match = events2.find((e) => e.payload.summary === summary);
+    assert.ok(match, 'reflected event survived the roundtrip');
+
+    // and the diary row itself is there, keyed by the original id
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(join(dest.soulDir, 'memories.db'), { readonly: true });
+    const row = db.prepare('SELECT id, summary FROM session_reflections WHERE summary = ?').get(summary);
+    db.close();
+    assert.ok(row, 'reflection row present after import');
+    assert.equal(row.id, match.entityId, 'reflection id preserved across the roundtrip');
+  } finally {
+    dest.child.kill();
   }
 });
 

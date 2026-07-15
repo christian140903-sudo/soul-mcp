@@ -133,13 +133,19 @@ export async function embedQuery(text: string): Promise<Float32Array | null> {
 // ─── Vector store (memory_vectors table + in-process cache) ──────────
 
 let vecCache: Map<string, Float32Array> | null = null;
+let vecCacheDataVersion = -1;
 
 export function invalidateVectorCache(): void {
   vecCache = null;
+  vecCacheDataVersion = -1;
 }
 
 function loadVectorCache(): Map<string, Float32Array> {
-  if (vecCache) return vecCache;
+  // Cross-process staleness guard: PRAGMA data_version changes whenever a
+  // DIFFERENT connection commits — so a Codex process sees vectors written
+  // by a Claude process without a restart. Own writes invalidate explicitly.
+  const currentVersion = (getDb().pragma('data_version', { simple: true }) as number) ?? 0;
+  if (vecCache && currentVersion === vecCacheDataVersion) return vecCache;
   const rows = getDb()
     .prepare(`SELECT id, dim, vector FROM memory_vectors`)
     .all() as Array<{ id: string; dim: number; vector: Buffer }>;
@@ -149,6 +155,7 @@ function loadVectorCache(): Map<string, Float32Array> {
     map.set(r.id, new Float32Array(r.vector.buffer, r.vector.byteOffset, r.dim));
   }
   vecCache = map;
+  vecCacheDataVersion = currentVersion;
   return map;
 }
 

@@ -15,22 +15,26 @@ import {
   correctMemory,
   forgetMemory,
   markUseful,
+  applyMemoryFeedback,
   getMemoryById,
   listMemories,
   listDisputedPairs,
   type MemoryType,
   type SourceType,
+  type Volatility,
 } from './kernel/memory.js';
 import { recall } from './kernel/retrieval.js';
-import { compileContext } from './kernel/context.js';
+import { compileContext, getCurrentClientSessionId, endClientSession } from './kernel/context.js';
+import { getDb } from './kernel/db.js';
+import { newId, nowIso } from './util/core.js';
 import { setIdentityFacet, getAllIdentity } from './kernel/identity.js';
 import { createGoal, updateGoal, listGoals, overdueCommitments, type GoalKind, type GoalStatus } from './kernel/goals.js';
-import { exportAll, importAll, importV1Export, type SoulExportV2 } from './kernel/transfer.js';
+import { exportAll, importAll, importV1Export, importEnvelopeV3, isEnvelopeV3, ChecksumMismatchError, UnsupportedSectionError, type SoulExportV2 } from './kernel/transfer.js';
 import { getStats, incrementSession, getSessionCount } from './kernel/stats.js';
-import { queryEvents, memoriesAsOf } from './kernel/ledger.js';
+import { queryEvents, memoriesAsOf, appendEvent } from './kernel/ledger.js';
 import { loadConstitution } from './kernel/policy.js';
 import { computeAssignments, resolveAssignment, openAssignmentViews } from './kernel/workbench.js';
-import { makePrediction, listPredictions, getCalibration, deliberate, type DeliberationKind } from './kernel/cognition.js';
+import { makePrediction, listPredictions, getCalibration, deliberate, commitDeliberation, type DeliberationKind } from './kernel/cognition.js';
 import { relatedMemories } from './kernel/semantic.js';
 import { SOUL_VERSION } from './kernel/db.js';
 
@@ -90,6 +94,11 @@ export function createSoulServer(): McpServer {
         namespace: z.string().optional().describe('Scope, e.g. a project name. Defaults to "default".'),
         valid_from: z.string().optional().describe('ISO date when the fact became true in the world (bitemporal).'),
         valid_until: z.string().optional().describe('ISO date when the fact stops being true.'),
+        volatility: z.enum(['stable', 'periodic', 'volatile']).optional().describe(
+          'How fast this fact goes stale. periodic (~180d) / volatile (~30d) facts get a review window ' +
+          'and return via the workbench (stale_fact) when verification is due. Default stable.'
+        ),
+        verification_ref: z.string().optional().describe('Source backing the fact\'s freshness (url, doc, message ref).'),
       }),
     },
     async (input) => {
@@ -116,6 +125,8 @@ export function createSoulServer(): McpServer {
         namespace: input.namespace,
         validFrom: input.valid_from,
         validUntil: input.valid_until,
+        volatility: input.volatility as Volatility | undefined,
+        verificationRef: input.verification_ref,
         actor: 'agent',
       });
       return jsonResult({
@@ -191,8 +202,13 @@ export function createSoulServer(): McpServer {
       }),
     },
     async ({ task, token_budget, namespace, model_hint }) => {
-      const hint = model_hint || server.server.getClientVersion()?.name;
-      const capsule = await compileContext(task, { tokenBudget: token_budget, namespace, actor: 'agent', modelHint: hint });
+      const capsule = await compileContext(task, {
+        tokenBudget: token_budget,
+        namespace,
+        actor: 'agent',
+        modelHint: model_hint, // model dimension: only an explicit hint
+        clientName: server.server.getClientVersion()?.name, // client dimension, kept separate
+      });
       return jsonResult(capsule);
     }
   );
@@ -255,18 +271,78 @@ export function createSoulServer(): McpServer {
         claim: z.string().describe('The falsifiable claim, specific enough to judge later.'),
         probability: z.number().min(0.01).max(0.99).describe('Your honest probability that it is true.'),
         due_at: z.string().optional().describe('ISO date when the claim becomes judgeable.'),
+        domain: z.string().optional().describe('Domain of the claim (code, planning, research, people …) — enables per-domain calibration.'),
+        decision_id: z.string().optional().describe('Deliberation/decision this prediction belongs to.'),
         namespace: z.string().optional(),
       }),
     },
-    async ({ claim, probability, due_at, namespace }) => {
+    async ({ claim, probability, due_at, domain, decision_id, namespace }) => {
       const p = makePrediction({
         claim,
         probability,
         dueAt: due_at,
+        domain,
+        decisionId: decision_id,
         namespace,
+        clientSessionId: getCurrentClientSessionId() ?? undefined,
         modelHint: server.server.getClientVersion()?.name,
       });
       return jsonResult({ id: p.id, claim: p.claim, probability: p.probability, due_at: p.dueAt, message: 'Registered. It will return via the workbench when due.' });
+    }
+  );
+
+  server.registerTool(
+    'soul_commit_deliberation',
+    {
+      title: 'Commit Deliberation',
+      description:
+        'Close a deliberation opened by soul_deliberate: record the verdict, your confidence, and the ' +
+        'assumptions it rests on. An uncommitted deliberation is an open thought — without the commit, ' +
+        'the ledger never learns what was actually decided.',
+      inputSchema: z.object({
+        deliberation_id: z.string(),
+        verdict: z.string().describe('The decision/diagnosis/design choice, in one or two sentences.'),
+        confidence: z.number().min(0).max(1),
+        assumptions: z.array(z.string()).optional(),
+        prediction_ids: z.array(z.string()).optional().describe('Predictions registered from this deliberation.'),
+      }),
+    },
+    async ({ deliberation_id, verdict, confidence, assumptions, prediction_ids }) => {
+      const result = commitDeliberation({
+        deliberationId: deliberation_id,
+        verdict,
+        confidence,
+        assumptions,
+        predictionIds: prediction_ids,
+      });
+      return jsonResult(result);
+    }
+  );
+
+  server.registerTool(
+    'soul_feedback',
+    {
+      title: 'Capsule Feedback',
+      description:
+        'Close the retrieval feedback loop: report which memories from a context capsule you actually ' +
+        'used and which were unhelpful. Unmentioned memories stay unknown — they are NOT marked ' +
+        'unhelpful. Feeds ranking (usage weight) and the retrieval measurement base.',
+      inputSchema: z.object({
+        context_id: z.string().describe('The context_id from the soul_context capsule.'),
+        used_ids: z.array(z.string()).optional().describe('Memory ids that genuinely informed your work.'),
+        unhelpful_ids: z.array(z.string()).optional().describe('Memory ids that were noise for this task.'),
+      }),
+    },
+    async ({ context_id, used_ids, unhelpful_ids }) => {
+      const result = applyMemoryFeedback(context_id, used_ids ?? [], unhelpful_ids ?? []);
+      return jsonResult({
+        ...result,
+        message:
+          `Feedback recorded (${result.used} used, ${result.unhelpful} unhelpful` +
+          (result.ignored > 0
+            ? `; ${result.ignored} ignored — not delivered in this capsule or already rated).`
+            : ').'),
+      });
     }
   );
 
@@ -562,25 +638,45 @@ export function createSoulServer(): McpServer {
     {
       title: 'Reflect',
       description:
-        'End-of-session reflection: store a summary and key learnings (as reflection-sourced memories with ' +
-        'appropriately lower confidence), update identity facets, increment the session counter.',
+        'End-of-session reflection: the session summary goes into its own session_reflections table ' +
+        '(it is a diary entry, not a fact — it no longer dilutes integrity metrics); only genuinely ' +
+        'reusable learnings become reflection-sourced memories. Optionally close the retrieval feedback ' +
+        'loop via memory_feedback. Increments the session counter and ends the client session.',
       inputSchema: z.object({
         summary: z.string().optional(),
         learnings: z.array(z.string()).optional(),
         identity_updates: z.array(z.object({ aspect: z.string(), value: z.string() })).optional(),
+        memory_feedback: z
+          .object({
+            context_id: z.string(),
+            used_ids: z.array(z.string()).optional(),
+            unhelpful_ids: z.array(z.string()).optional(),
+          })
+          .optional()
+          .describe('Which capsule memories were actually used/unhelpful this session.'),
       }),
     },
-    async ({ summary, learnings, identity_updates }) => {
+    async ({ summary, learnings, identity_updates, memory_feedback }) => {
       const sessionNumber = incrementSession();
       const stored: string[] = [];
       if (summary) {
-        const r = capture({
-          content: `Session ${sessionNumber} reflection: ${summary}`,
-          category: 'learning',
-          importance: 0.7,
-          sourceType: 'reflection',
+        // diary entry, not a memory: session_reflections (v3.1, S6 fix) —
+        // insert + ledger event atomically, so the summary stays visible on
+        // the timeline (soul_timeline) even though it left the memories table
+        const db = getDb();
+        const srefId = newId('sref');
+        const writeReflection = db.transaction(() => {
+          db.prepare(
+            `INSERT INTO session_reflections (id, session_number, summary, learnings_count, client_session_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).run(srefId, sessionNumber, summary, (learnings ?? []).length, getCurrentClientSessionId(), nowIso());
+          appendEvent('session.reflected', 'system', srefId, {
+            session_number: sessionNumber,
+            summary,
+            learnings_count: (learnings ?? []).length,
+          }, { actor: 'agent' });
         });
-        if (r.memory) stored.push(r.memory.id);
+        writeReflection();
       }
       for (const learning of learnings ?? []) {
         const r = capture({ content: learning, category: 'learning', importance: 0.6, sourceType: 'reflection' });
@@ -589,10 +685,16 @@ export function createSoulServer(): McpServer {
       const facets = (identity_updates ?? []).map((u) =>
         setIdentityFacet(u.aspect, u.value, { sourceType: 'reflection' })
       );
+      const feedback = memory_feedback
+        ? applyMemoryFeedback(memory_feedback.context_id, memory_feedback.used_ids ?? [], memory_feedback.unhelpful_ids ?? [])
+        : null;
+      endClientSession();
       const stats = getStats();
       return jsonResult({
         session: sessionNumber,
+        summary_stored: !!summary,
         learnings_stored: stored.length,
+        ...(feedback ? { feedback } : {}),
         identity_updates: facets.map((f) => ({ aspect: f.aspect, value: f.value, confidence: f.confidence })),
         soul_status: { memories: stats.totalMemories, integrity: stats.integrity },
       });
@@ -661,10 +763,26 @@ export function createSoulServer(): McpServer {
       title: 'Import',
       description:
         'Import a soul-passport export (v2) or a legacy v1 export. v2 imports are idempotent — re-importing ' +
-        'the same file changes nothing. A checksum mismatch is reported but does not block the import.',
+        'the same file changes nothing. A checksum mismatch refuses the import (the file was altered after ' +
+        'export). Live memories are screened on import: secrets are dropped, injection-like content is ' +
+        'quarantined, and user_statement provenance without a source_ref is downgraded to import.',
       inputSchema: z.object({ data: z.string().describe('The JSON string from soul_export.') }),
     },
     async ({ data }) => {
+      // Availability guard (threat model TB3): refuse oversized payloads
+      // before JSON.parse touches them — a passport is bounded data, not a
+      // bulk channel. 50 MB is ~100x a large real soul.
+      const MAX_IMPORT_BYTES = Number(process.env.SOUL_MAX_IMPORT_BYTES) || 50 * 1024 * 1024;
+      if (Buffer.byteLength(data, 'utf8') > MAX_IMPORT_BYTES) {
+        return {
+          ...jsonResult({
+            success: false,
+            error: `Import exceeds ${MAX_IMPORT_BYTES} bytes — refused before parsing.`,
+            reason: 'too_large',
+          }),
+          isError: true,
+        };
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(data);
@@ -673,6 +791,13 @@ export function createSoulServer(): McpServer {
       }
       try {
         const obj = parsed as Record<string, unknown>;
+        // Forward-compat (3.2.0): a PassportEnvelope@3 is read through the
+        // sectioned reader; its verified 'core' section runs the same 2.0.0
+        // import path. exportAll still writes 2.0.0 (F01).
+        if (isEnvelopeV3(obj)) {
+          const result = importEnvelopeV3(obj);
+          return jsonResult({ success: true, format: 'envelope-v3', ...result });
+        }
         if (obj.format === 'soul-passport') {
           const result = importAll(obj as unknown as SoulExportV2);
           return jsonResult({ success: true, format: 'v2', ...result });
@@ -683,7 +808,19 @@ export function createSoulServer(): McpServer {
         }
         return { ...jsonResult({ success: false, error: 'Unrecognized export format.' }), isError: true };
       } catch (err) {
-        return { ...jsonResult({ success: false, error: String(err) }), isError: true };
+        const reason = err instanceof ChecksumMismatchError
+          ? 'checksum_mismatch'
+          : err instanceof UnsupportedSectionError
+            ? 'unsupported_required_section'
+            : undefined;
+        return {
+          ...jsonResult({
+            success: false,
+            error: String(err instanceof Error ? err.message : err),
+            ...(reason ? { reason } : {}),
+          }),
+          isError: true,
+        };
       }
     }
   );
