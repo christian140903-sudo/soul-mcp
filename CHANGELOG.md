@@ -14,8 +14,8 @@ passport format changes.
   `server.json`, the runtime and the README cannot silently drift apart.
 
 ### Added
-- GitHub Actions CI across Node 18, 20 and 22, plus a package-content smoke
-  check on Node 22.
+- GitHub Actions CI across Node 20, 22 and 24, plus a package-content smoke
+  check on Node 24.
 - Public-claim regression tests. The README must keep the central honesty
   boundaries visible: no worker, no model benchmark result and no false
   `deterministic_verified` receipt claim.
