@@ -13,6 +13,8 @@ test('release metadata: npm, MCP manifest and runtime versions stay aligned', ()
   assert.equal(manifest.packages[0].version, pkg.version);
   assert.match(dbSource, new RegExp(`SOUL_VERSION = '${pkg.version.replaceAll('.', '\\.')}'`));
   assert.match(readme, new RegExp(`Current release: \\*\\*${pkg.version.replaceAll('.', '\\.')}\\*\\*`));
+  assert.equal(pkg.engines.node, '>=20.0.0');
+  assert.equal(pkg.scripts.test, 'npm run build && node scripts/run-tests.mjs');
   assert.equal(pkg.scripts.prepack, 'npm run build');
   assert.equal(pkg.scripts['smoke:pack'], 'node scripts/release-smoke.mjs');
   assert.ok(existsSync(new URL('../docs/assets/soul-banner.webp', import.meta.url)));

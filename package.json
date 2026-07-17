@@ -12,7 +12,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/src/index.js serve",
-    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "test": "npm run build && node scripts/run-tests.mjs",
     "prepack": "npm run build",
     "smoke:pack": "node scripts/release-smoke.mjs",
     "prepublishOnly": "npm run test"
@@ -59,7 +59,7 @@
   },
   "homepage": "https://christian140903-sudo.github.io/#systems",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "publishConfig": {
     "access": "public"

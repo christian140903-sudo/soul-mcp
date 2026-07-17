@@ -221,7 +221,7 @@ and never attach a real database or passport to a public issue.
 The 4.0 release baseline passed 355 tests, including MCP golden transcripts,
 database migrations, import and secret-handling regressions, retry races,
 signed-pack failures and five SIGKILL chaos cases. CI now runs the full suite on
-Node 18, 20 and 22. `npm pack --dry-run` checks the public package contents.
+Node 20, 22 and 24. `npm pack --dry-run` checks the public package contents.
 
 Run it yourself:
 

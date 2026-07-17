@@ -5,7 +5,7 @@ cloud account.
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 20 or newer
 - an MCP client that can launch a local stdio server
 
 ## 1. Initialize and check the local store
