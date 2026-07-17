@@ -1,7 +1,7 @@
 {
   "name": "soul-mcp",
-  "version": "4.0.0",
-  "description": "A soul for your AI: trusted memory (provenance, ledger, policy-in-code) plus a thinking loop \u2014 the Denkpartner protocol \u2014 that turns any model into the memory's reasoning engine and feeds the model its own calibration record. Local-first, one MCP server.",
+  "version": "4.0.1",
+  "description": "Local-first persistent memory and an auditable runtime for Claude, Cursor, Windsurf and any MCP client. Provenance, conflict handling, receipts and no cloud.",
   "type": "module",
   "main": "dist/src/index.js",
   "bin": {
@@ -12,7 +12,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/src/index.js serve",
-    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "test": "npm run build && node scripts/run-tests.mjs",
+    "prepack": "npm run build",
+    "smoke:pack": "node scripts/release-smoke.mjs",
     "prepublishOnly": "npm run test"
   },
   "keywords": [
@@ -27,12 +29,23 @@
     "event-sourcing",
     "provenance",
     "context-engineering",
-    "local-first"
+    "local-first",
+    "claude-code",
+    "cursor",
+    "windsurf",
+    "mcp-server",
+    "ai-agent-memory",
+    "sqlite"
   ],
-  "author": "Miguel <miguel@nextool.app>",
+  "author": "Christian Bucher",
+  "contributors": [
+    "Miguel (AI systems co-builder, under human review)"
+  ],
   "license": "MIT",
   "files": [
     "dist/src",
+    "server.json",
+    "examples",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -41,9 +54,15 @@
     "type": "git",
     "url": "https://github.com/christian140903-sudo/soul-mcp"
   },
-  "homepage": "https://nextool.app/soul",
+  "bugs": {
+    "url": "https://github.com/christian140903-sudo/soul-mcp/issues"
+  },
+  "homepage": "https://christian140903-sudo.github.io/#systems",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

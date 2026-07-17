@@ -1,5 +1,5 @@
 /**
- * Soul MCP Server v2 — tools, resources and prompts.
+ * Soul MCP Server — tools, resources and prompts.
  *
  * Design rules:
  * - stdout belongs to the MCP protocol; anything human goes to stderr.

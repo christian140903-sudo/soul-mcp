@@ -1,0 +1,29 @@
+name: Feature proposal
+description: Propose a focused addition with an explicit trust and compatibility story.
+title: "[Proposal]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem exists without this feature?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Smallest useful change
+    validations:
+      required: true
+  - type: textarea
+    id: trust
+    attributes:
+      label: Trust, privacy and migration impact
+      description: Describe new data, authority, network access, compatibility or migration consequences.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or alternatives considered

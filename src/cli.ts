@@ -86,7 +86,7 @@ function init(): void {
   } else {
     console.log(`${GREEN}  ✓${RESET} Database created at ${CYAN}${dbPath}${RESET}`);
     capture({
-      content: 'Soul v2 was initialized. Event ledger, capture pipeline and context compiler are active.',
+      content: `Soul v${SOUL_VERSION} was initialized. The event ledger, capture pipeline, context compiler and durable run layer are active.`,
       category: 'learning',
       importance: 0.6,
       sourceType: 'reflection',
@@ -426,7 +426,7 @@ function printConfig(): void {
 
 function help(): void {
   console.log('');
-  console.log(`${AMBER}${BOLD}  Soul MCP v2${RESET} — a trusted continuity layer for your AI.`);
+  console.log(`${AMBER}${BOLD}  Soul MCP v${SOUL_VERSION}${RESET} — memory with provenance, work with receipts.`);
   console.log('');
   console.log(`  ${BOLD}Commands${RESET}`);
   console.log(`    ${CYAN}soul-mcp init${RESET}                Initialize (or migrate a v1 database, with backup)`);

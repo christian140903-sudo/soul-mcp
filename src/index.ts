@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Soul MCP v2 — single entry point.
+ * Soul MCP — single entry point.
  *
  * The v1 packaging bug (bin pointed at the init script, so MCP clients
  * launched a banner instead of a server) is fixed here structurally:
