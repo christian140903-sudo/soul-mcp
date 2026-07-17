@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextool.app/soul/contracts/VerifierResult@1.schema.json",
+  "title": "VerifierResult@1",
+  "description": "Ergebnis einer Verifikation. THREAT-MODEL TB2: 'der Verifier, der ein Ergebnis bewertet, ist nie dieselbe Modellinstanz, die es erzeugt hat'; deterministische Checks dominieren Modellurteile (TB2/TB7). §5 Invariante 6: 'Wer erzeugt, bewertet nicht; wer bewertet, promotet nicht allein.' model_graded-Ergebnisse müssen deshalb Verifier- UND Producer-Modell ausweisen (die Ungleichheit der Instanzen prüft die Runtime — ein Schema kann Instanz-Identität nicht beweisen, nur die Deklarationspflicht erzwingen). Taint gemäß F08/TB7: ein Lauf, dessen Prozess Held-out-Key oder Klartext-Pfad sah, ist ungültig.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "verifier_result_id", "run_id", "kind", "passed", "tainted", "created_at"],
+  "properties": {
+    "contract": { "const": "VerifierResult@1" },
+    "verifier_result_id": { "$ref": "#/$defs/id" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "receipt_id": { "$ref": "#/$defs/id" },
+    "kind": {
+      "enum": ["deterministic", "model_graded"],
+      "description": "deterministic = mechanisch prüfbar (Exit-Codes, Schema-Validierung, Hidden Tests); model_graded = Modellurteil, immer die schwächere Evidenzklasse (TB2)."
+    },
+    "passed": { "type": "boolean" },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Optionaler kontinuierlicher Score; passed bleibt das bindende Urteil."
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "passed"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "passed": { "type": "boolean" },
+          "evidence": { "type": "string", "maxLength": 1000, "description": "Evidenz-Pfad/Zeile bzw. Log-Auszug — prüfbar, nicht behauptet." }
+        }
+      }
+    },
+    "verifier_model": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Pflicht bei kind=model_graded. Muss eine ANDERE Modellinstanz als producer_model sein (TB2 — Runtime-Check)."
+    },
+    "producer_model": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Pflicht bei kind=model_graded: welche Instanz das bewertete Ergebnis erzeugt hat."
+    },
+    "tainted": {
+      "type": "boolean",
+      "description": "F08/TB7: true, wenn der Prozess Held-out-Key oder Klartext-Pfad sah — das Ergebnis ist dann ungültig und zählt in keiner Statistik."
+    },
+    "created_at": { "$ref": "#/$defs/isoDateTime" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "model_graded" } }, "required": ["kind"] },
+      "then": { "required": ["verifier_model", "producer_model"] }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "isoDateTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" }
+  },
+  "examples": [
+    {
+      "contract": "VerifierResult@1",
+      "verifier_result_id": "vr-2026-07-16-0001",
+      "run_id": "run-2026-07-16-0001",
+      "receipt_id": "rcpt-2026-07-16-0001",
+      "kind": "deterministic",
+      "passed": true,
+      "score": 1,
+      "checks": [
+        { "name": "npm-test-exit-code", "passed": true, "evidence": "node --test exit 0, 107/107 pass" },
+        { "name": "regression-test-was-red", "passed": true, "evidence": "test/ledger.test.mjs fail vor Fix (Log attempt-1/pre.txt)" }
+      ],
+      "tainted": false,
+      "created_at": "2026-07-16T12:03:00Z"
+    }
+  ]
+}

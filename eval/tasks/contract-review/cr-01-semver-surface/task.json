@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "cr-01-semver-surface",
+  "cluster": "contract-review",
+  "skill_stage": 4,
+  "title": "Minor-Release-Änderung gegen API-Kompatibilitätsvertrag prüfen",
+  "description": "Im Arbeitsverzeichnis liegt CONTRACT.md (der bindende API-Vertrag für Minor-Releases, Regeln R1–R3), original/rows.mjs (aktueller Release-Stand) und proposed/rows.mjs (die zu prüfende Änderung, geplant als Minor-Release). Prüfe die Änderung gegen JEDE Regel und schreibe artifact/review.json mit EXAKT diesen Feldern: verdict (\"approve\" wenn keine Regel verletzt ist, sonst \"reject\") und violations: Liste von Objekten {rule, symbol} — rule = Regel-ID aus CONTRACT.md (z. B. \"R1\"), symbol = Name des betroffenen Exports. Jede tatsächliche Verletzung muss genau einmal gelistet sein; erlaubte Änderungen dürfen NICHT gelistet werden. Ändere keinen Code.",
+  "task_slice": { "kind": "code_review", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "artifact/review.json", "kind": "json", "description": "Review mit verdict + exakter Verletzungsliste" }
+  ],
+  "budget_hint": { "max_tokens": 12000, "max_wall_clock_s": 180, "max_cost_eur": 0.5, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

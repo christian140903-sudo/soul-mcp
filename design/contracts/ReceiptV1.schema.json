@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextool.app/soul/contracts/ReceiptV1.schema.json",
+  "title": "ReceiptV1",
+  "description": "Jeder Run hat ein Receipt — auch der abgestürzte (THREAT-MODEL §5 Invariante 8). 'Der Worker schreibt sein finales Receipt nie selbst: ein Coordinator/Reaper erzeugt Receipts aus Attempt-State + Worker-Log — auch für Timeout, Crash und Kill' (DECISIONS F09) — deshalb issued_by ∈ {coordinator, reaper}. Ehrlichkeitsklassen: self_attested < deterministic_verified < model_graded — 'ein Receipt sagt immer dazu, wie sehr man ihm glauben darf' (F09). Run-Ergebnisse tragen NIE user-Autorität (TB1: 'Receipts buchen actor immer als agent/runner') — 'user' ist absichtlich kein gültiger actor. Kontextmodus (F09r2, SOUL4-PLAN Phase 2): soul_run ohne Worker legt SYNCHRON ein Receipt pending/self_attested an; soul_feedback schließt es (ggf. Hochstufung auf deterministic_verified); bleibt Feedback aus, schließt der Reaper nach Timeout (Default 7 Tage) als expired_unconfirmed. Die Receipt-Invariante gilt in BEIDEN Modi ab Run-Erzeugung.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "receipt_id", "run_id", "attempt", "fencing_token", "mode", "status", "honesty_class", "actor", "issued_by", "tainted", "created_at"],
+  "properties": {
+    "contract": { "const": "ReceiptV1" },
+    "receipt_id": { "$ref": "#/$defs/id" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "at-least-once + Fencing (F09/TB8): RunAttempt + Budget-Reservierung atomar VOR Dispatch; Side-Effects laufen attempt-scoped."
+    },
+    "fencing_token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Jeder Attempt trägt ein Fencing-Token; der Commit-Schritt prüft es — ein verwaister alter Worker kann nie mehr committen (F09)."
+    },
+    "mode": {
+      "enum": ["worker", "context"],
+      "description": "worker = Ausführung via RunnerAdapter/soul-worker; context = kontext-getriebener Modus ohne Worker (F09r2)."
+    },
+    "status": {
+      "enum": ["pending", "succeeded", "failed", "cancelled", "crashed", "timeout", "expired_unconfirmed"],
+      "description": "expired_unconfirmed: Reaper-Abschluss nach ausgebliebenem Feedback im Kontextmodus (F09r2). Abbruch/Timeout/Crash erzeugen ebenfalls Receipts — 'kein Lauf ohne Receipt, gerade der gescheiterte nicht' (F09)."
+    },
+    "honesty_class": {
+      "enum": ["self_attested", "deterministic_verified", "model_graded"],
+      "description": "Ehrlichkeitsklasse (F09): self_attested < deterministic_verified < model_graded; deterministische Checks dominieren Modellurteile (TB2/TB7)."
+    },
+    "actor": {
+      "enum": ["agent", "runner", "coordinator", "reaper"],
+      "description": "'soul_run-Ergebnisse dürfen NIE user-Autorität tragen; Receipts buchen actor immer als agent/runner' (THREAT-MODEL TB1) — 'user' ist strukturell ausgeschlossen."
+    },
+    "issued_by": {
+      "enum": ["coordinator", "reaper"],
+      "description": "Receipts schreibt der Coordinator/Reaper, NIE der Worker selbst (F09, §5 Invariante 8) — 'worker' ist strukturell ausgeschlossen."
+    },
+    "tainted": {
+      "type": "boolean",
+      "description": "Two-Key/Taint (F08/TB7): 'der Wrapper taintet jeden Lauf, dessen Prozess Key oder Klartext-Pfad je gesehen hat — getaintete Läufe sind ungültig, das steht im Receipt.'"
+    },
+    "outcome_summary": { "type": "string", "maxLength": 2000 },
+    "verifier_result_ids": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/id" },
+      "description": "Referenzen auf VerifierResult@1-Objekte; Voraussetzung für Hochstufung auf deterministic_verified/model_graded."
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokens_in": { "type": "integer", "minimum": 0 },
+        "tokens_out": { "type": "integer", "minimum": 0 },
+        "tokens_est": { "type": "integer", "minimum": 0 },
+        "wall_clock_ms": { "type": "integer", "minimum": 0 },
+        "cost_eur": { "type": "number", "minimum": 0 }
+      }
+    },
+    "authority_envelope_id": {
+      "$ref": "#/$defs/id",
+      "description": "AuthorityEnvelope@1, unter dem der Run lief — Budget-Nachweis: ohne Budget kein Run (R5)."
+    },
+    "created_at": { "$ref": "#/$defs/isoDateTime" },
+    "closed_at": {
+      "$ref": "#/$defs/isoDateTime",
+      "description": "Zeitpunkt des Abschlusses (Feedback, Verifier oder Reaper); fehlt solange status=pending."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "pending" } }, "required": ["status"] },
+      "then": {
+        "properties": { "honesty_class": { "const": "self_attested" } },
+        "description": "F09r2: das synchron angelegte Receipt ist pending in Klasse self_attested; Hochstufung erst beim Abschluss."
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "expired_unconfirmed" } }, "required": ["status"] },
+      "then": {
+        "properties": { "issued_by": { "const": "reaper" }, "honesty_class": { "const": "self_attested" } },
+        "description": "expired_unconfirmed schließt nur der Reaper; ausgebliebenes Feedback stuft nie hoch (F09r2)."
+      }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "isoDateTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" }
+  },
+  "examples": [
+    {
+      "contract": "ReceiptV1",
+      "receipt_id": "rcpt-2026-07-16-0001",
+      "run_id": "run-2026-07-16-0001",
+      "attempt": 1,
+      "fencing_token": "fence-7f3a9c",
+      "mode": "worker",
+      "status": "succeeded",
+      "honesty_class": "deterministic_verified",
+      "actor": "runner",
+      "issued_by": "coordinator",
+      "tainted": false,
+      "outcome_summary": "Fix angewendet; node --test grün (Exit 0), Regression-Test war vorher rot.",
+      "verifier_result_ids": ["vr-2026-07-16-0001"],
+      "cost": { "tokens_in": 42000, "tokens_out": 6100, "wall_clock_ms": 184000, "cost_eur": 0.61 },
+      "authority_envelope_id": "env-2026-07-16-0001",
+      "created_at": "2026-07-16T12:00:05Z",
+      "closed_at": "2026-07-16T12:03:09Z"
+    }
+  ]
+}

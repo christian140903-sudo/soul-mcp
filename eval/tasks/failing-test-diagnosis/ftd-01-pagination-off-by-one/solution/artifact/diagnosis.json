@@ -1,0 +1,11 @@
+{
+  "defect_file": "lib/paginate.mjs",
+  "defect_function": "pageSlice",
+  "category": "off_by_one",
+  "trigger": {
+    "args": [["a", "b", "c", "d", "e"], 1, 2],
+    "observed": "return",
+    "expected": ["a", "b"],
+    "actual": ["a", "b", "c"]
+  }
+}

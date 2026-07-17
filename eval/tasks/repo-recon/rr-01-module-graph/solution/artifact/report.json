@@ -1,0 +1,16 @@
+{
+  "files": ["src/format.mjs", "src/index.mjs", "src/math.mjs", "src/util/unused.mjs"],
+  "exports": {
+    "src/format.mjs": ["formatCurrency"],
+    "src/index.mjs": ["invoiceTotal"],
+    "src/math.mjs": ["add", "multiply"],
+    "src/util/unused.mjs": ["slugify"]
+  },
+  "imports": {
+    "src/format.mjs": ["src/math.mjs"],
+    "src/index.mjs": ["src/format.mjs", "src/math.mjs"],
+    "src/math.mjs": [],
+    "src/util/unused.mjs": []
+  },
+  "orphans": ["src/util/unused.mjs"]
+}

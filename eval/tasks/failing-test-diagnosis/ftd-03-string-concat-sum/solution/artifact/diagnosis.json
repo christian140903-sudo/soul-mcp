@@ -1,0 +1,11 @@
+{
+  "defect_file": "lib/ledger.mjs",
+  "defect_function": "sumAmounts",
+  "category": "type_coercion",
+  "trigger": {
+    "args": [[{ "amount": "2" }, { "amount": "3" }]],
+    "observed": "return",
+    "expected": 5,
+    "actual": "023"
+  }
+}

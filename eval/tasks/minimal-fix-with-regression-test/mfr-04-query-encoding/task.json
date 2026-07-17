@@ -1,0 +1,16 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "mfr-04-query-encoding",
+  "cluster": "minimal-fix-with-regression-test",
+  "skill_stage": 3,
+  "title": "Query-Builder: fehlendes URL-Encoding fixen + Regressionstest",
+  "description": "lib/query.mjs enthält buildQuery(params). Beobachteter Fehler: Keys und Werte werden NICHT URL-encoded — ein Wert wie \"a&b=c\" zerstört die Query-Struktur: buildQuery({q: \"a&b=c\"}) liefert \"q=a&b=c\" statt \"q=a%26b%3Dc\". Erwartung: Keys und Werte werden mit encodeURIComponent encoded. Die bestehende Testsuite ist grün, weil sie nur harmlose Werte abdeckt. Auftrag: (1) Fixe den Defekt MINIMAL — es darf ausschließlich lib/query.mjs geändert werden; bestehende Tests bleiben unangetastet und müssen grün bleiben. (2) Lege test/regression.test.mjs an: einen Test, der auf dem ALTEN Code fehlschlägt und auf dem gefixten besteht. Der Verifier prüft beides mechanisch. Keine weiteren Dateien anlegen.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/query.mjs", "kind": "source", "description": "minimal gefixte Implementierung" },
+    { "path": "test/regression.test.mjs", "kind": "test", "description": "Regressionstest, der vorher rot war" }
+  ],
+  "budget_hint": { "max_tokens": 16000, "max_wall_clock_s": 240, "max_cost_eur": 0.8, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

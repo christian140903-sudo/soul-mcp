@@ -187,6 +187,22 @@ verteilte Systeme können das für externe Effekte nicht garantieren.
 - **Chaos-Testmatrix** statt eines Lease-Tests: kill −9 an JEDER Grenze
   (vor Dispatch / im Run / vor Commit / vor Receipt) ist je ein eigener
   Testfall der Phase-2-Akzeptanz.
+- **Kontext-getriebener Modus (ohne Worker) — vollständiger Receipt-Vertrag
+  (per r2-F09, verbindlich auch hier, nicht nur im PLAN):** `soul_run` ohne
+  Worker liefert den kompilierten TaskContract + Rezept als Kapsel zurück
+  und legt SYNCHRON bei Run-Erzeugung ein Receipt im Zustand `pending`
+  (Ehrlichkeitsklasse `self_attested`) an. Rückmeldung über `soul_feedback`
+  schließt es (ggf. Hochstufung auf `deterministic_verified`); bleibt
+  Feedback aus, schließt der Reaper es nach definiertem Timeout
+  (Default 7 Tage) als `expired_unconfirmed`. Die Invariante „jeder Run hat
+  ein Receipt" gilt in BEIDEN Modi synchron ab Run-Erzeugung — nur der
+  Abschlussweg unterscheidet sich. `expired_unconfirmed` ist Missingness,
+  nie ein Erfolgs- oder Misserfolgs-Beleg.
+  *(Baustand-Präzisierung per Bündel-Gate F02: die „ggf. Hochstufung auf
+  `deterministic_verified`" findet in 4.0 NICHT statt — sie setzt ein
+  validiertes VerifierResult@1 voraus, das 4.0 nicht produziert. Gebaut ist:
+  das Receipt bleibt `self_attested`; `evidence_ref` wird als auditierbarer
+  Verweis geführt, ohne Klassenwechsel. Test: `test/runs.test.mjs`.)*
 
 ## F10 — Verlorene Verträge: vollständige Disposition
 
@@ -196,7 +212,7 @@ verteilte Systeme können das für externe Effekte nicht garantieren.
 | Retry / Cancel | Phase 2 (Teil der State Machine) | Phase 2 | Phase 2 (inkl. Chaos-Matrix F09) |
 | Skill-Dependencies, Konfliktauflösung, Skill-SemVer | Phase 3 (SkillManifest@1) | Phase 3 | Phase 3 |
 | Cross-Soul-Sync | — | **explizit NICHT in 4.0** | — |
-| Import-DoS-Limits (F14) | erledigt | 3.2.0 (`SOUL_MAX_IMPORT_BYTES`-Guard; Suite aktuell 107 Tests) | ✓ golden-contracts |
+| Import-DoS-Limits (F14) | erledigt | 3.2.0 (`SOUL_MAX_IMPORT_BYTES`-Guard; Suite am r3-Freeze-Stand: 107 Tests) | ✓ golden-contracts |
 
 ---
 

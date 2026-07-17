@@ -15,6 +15,7 @@ import { listDisputedPairs, expireStaleCandidates, consolidateImportance } from 
 import { getCalibration } from './cognition.js';
 import { loadConstitution, resolveModelProfile } from './policy.js';
 import { computeAssignments, openAssignmentViews, type AssignmentView } from './workbench.js';
+import { getSkillsForTask, type CapsuleSkill } from './skills.js';
 import { appendEvent } from './ledger.js';
 import { estimateTokens, parseDuration, newId, nowIso, contentHash } from '../util/core.js';
 
@@ -45,6 +46,13 @@ export interface ContextCapsule {
   model_profile?: string;
   briefing?: string;
   workbench?: AssignmentView[];
+  /**
+   * Phase 3, additive: task-scoped skills (≤3, PROMOTED only — shadow/canary
+   * never reach a normal capsule, TB5.3). Absent unless a promoted skill
+   * deterministically matches the task, so the pre-skills capsule shape is
+   * byte-identical.
+   */
+  skills?: CapsuleSkill[];
 }
 
 // ─── Client sessions (v3.1): which client/model is on the other side ──
@@ -223,6 +231,25 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
     tx();
   }
 
+  // 5b. Task-scoped skills (Phase 3, TB5.3): only PROMOTED skills, ≤3,
+  // matched deterministically (compatibility vector + token overlap — no LLM
+  // call). When nothing matches, the capsule carries NO skills key and the
+  // shape stays byte-identical to the pre-skills contract (golden tests).
+  {
+    const skillMatches = getSkillsForTask(task, {
+      modelHint: opts.modelHint,
+      tokenBudget: budget,
+    });
+    if (skillMatches.length > 0) {
+      const cost = estimateTokens(JSON.stringify(skillMatches));
+      if (remaining - cost >= 0) {
+        remaining -= cost;
+        capsule.skills = skillMatches;
+        capsule.token_estimate = budget - remaining;
+      }
+    }
+  }
+
   // 6. Denkpartner protocol: attach briefing + open think-assignments when
   // the model profile allows it and the budget still has room.
   const { name: profileName, profile } = resolveModelProfile(opts.modelHint ?? opts.clientName);
@@ -261,6 +288,9 @@ export async function compileContext(task: string, opts: CompileOptions = {}): P
     token_estimate: capsule.token_estimate,
     model_profile: capsule.model_profile ?? null,
     workbench: (capsule.workbench ?? []).map((a) => a.id),
+    // additive: only present when skills were attached (keeps the ledger
+    // payload identical for skill-less capsules)
+    ...(capsule.skills ? { skills: capsule.skills.map((s) => `${s.name}@${s.version}`) } : {}),
   }, { actor: opts.actor || 'context-compiler' });
 
   return capsule;

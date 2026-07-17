@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rut-04-flatten-nesting",
+  "cluster": "refactor-under-tests",
+  "skill_stage": 5,
+  "title": "Tief verschachtelte Zugriffslogik unter grünen Tests flach ziehen",
+  "description": "lib/access.mjs enthält canAccess(user, resource) als tief verschachtelte if/else-Pyramide (Verschachtelungstiefe > 4). Die Testsuite deckt die Entscheidungstabelle vollständig ab, ist grün und bleibt UNANGETASTET (der Verifier lehnt jede Test-Änderung ab). Auftrag: Refaktoriere canAccess auf flache Guard-Clauses/frühe Returns, OHNE das Verhalten zu ändern. Mechanische Invarianten des Verifiers: (1) maximale Klammer-Verschachtelungstiefe der Datei ≤ 4 (Funktionskörper = Tiefe 1); (2) keine Zeile länger als 100 Zeichen; (3) alle Tests grün; (4) Export-Oberfläche bleibt exakt {canAccess}. Nur lib/access.mjs ändern, keine neuen Dateien.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/access.mjs", "kind": "source", "description": "flach refaktorierte, verhaltensgleiche Implementierung" }
+  ],
+  "budget_hint": { "max_tokens": 20000, "max_wall_clock_s": 300, "max_cost_eur": 1, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

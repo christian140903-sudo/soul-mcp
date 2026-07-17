@@ -1,0 +1,11 @@
+{
+  "defect_file": "lib/stats.mjs",
+  "defect_function": "median",
+  "category": "wrong_comparator",
+  "trigger": {
+    "args": [[10, 2, 33]],
+    "observed": "return",
+    "expected": 10,
+    "actual": 2
+  }
+}

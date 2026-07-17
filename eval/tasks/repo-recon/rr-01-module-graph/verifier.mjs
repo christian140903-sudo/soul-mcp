@@ -1,0 +1,64 @@
+// Verifier rr-01-module-graph — deterministisch, Exit 0 = pass.
+// Aufruf: node verifier.mjs <workdir>
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, join } from "node:path";
+
+const workdir = process.argv[2];
+if (!workdir) { console.error("usage: node verifier.mjs <workdir>"); process.exit(2); }
+const wd = resolve(workdir);
+
+const fails = [];
+function check(cond, msg) {
+  if (cond) console.log("ok: " + msg);
+  else { fails.push(msg); console.log("FAIL: " + msg); }
+}
+function normalize(v) {
+  if (Array.isArray(v)) {
+    return v.map(normalize).sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  }
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.keys(v).sort().map((k) => [k, normalize(v[k])]));
+  }
+  return v;
+}
+function deepEqual(a, b) {
+  return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+}
+
+const EXPECTED = {
+  files: ["src/format.mjs", "src/index.mjs", "src/math.mjs", "src/util/unused.mjs"],
+  exports: {
+    "src/format.mjs": ["formatCurrency"],
+    "src/index.mjs": ["invoiceTotal"],
+    "src/math.mjs": ["add", "multiply"],
+    "src/util/unused.mjs": ["slugify"]
+  },
+  imports: {
+    "src/format.mjs": ["src/math.mjs"],
+    "src/index.mjs": ["src/format.mjs", "src/math.mjs"],
+    "src/math.mjs": [],
+    "src/util/unused.mjs": []
+  },
+  orphans: ["src/util/unused.mjs"]
+};
+
+const reportPath = join(wd, "artifact", "report.json");
+check(existsSync(reportPath), "artifact/report.json existiert");
+let report = null;
+if (existsSync(reportPath)) {
+  try {
+    report = JSON.parse(readFileSync(reportPath, "utf8"));
+  } catch (e) {
+    check(false, "artifact/report.json ist valides JSON (" + e.message + ")");
+  }
+}
+if (report) {
+  check(deepEqual(report.files, EXPECTED.files), "files vollstaendig und korrekt");
+  check(deepEqual(report.exports, EXPECTED.exports), "exports pro Datei korrekt");
+  check(deepEqual(report.imports, EXPECTED.imports), "import-Kanten korrekt");
+  check(deepEqual(report.orphans, EXPECTED.orphans), "orphans korrekt");
+}
+
+if (fails.length) { console.log("VERDICT: fail (" + fails.length + ")"); process.exit(1); }
+console.log("VERDICT: pass");
+process.exit(0);

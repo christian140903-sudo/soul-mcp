@@ -15,8 +15,8 @@ import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { nowIso, contentHash } from '../util/core.js';
 
-export const SCHEMA_VERSION = 9;
-export const SOUL_VERSION = '3.2.0';
+export const SCHEMA_VERSION = 12;
+export const SOUL_VERSION = '4.0.0';
 
 export function getSoulDir(): string {
   const dir = process.env.SOUL_DIR || join(homedir(), '.soul');
@@ -151,6 +151,15 @@ function migrate(db: Database.Database, from: number): void {
     }
     if (from < 9) {
       createV9Additions(db);
+    }
+    if (from < 10) {
+      createV10Additions(db);
+    }
+    if (from < 11) {
+      createV11Additions(db);
+    }
+    if (from < 12) {
+      createV12Additions(db);
     }
     const upsertMeta = db.prepare(
       `INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -469,6 +478,162 @@ function createV9Additions(db: Database.Database): void {
     -- Purge content of already soft-deleted rows from the index (one-time backfill).
     INSERT INTO memories_fts(memories_fts, rowid, content, category, tags)
     SELECT 'delete', rowid, content, category, tags FROM memories WHERE status = 'deleted';
+  `);
+}
+
+/**
+ * v10 (Soul 4.0 Phase 2 Welle A), all additive: the Durable Run State
+ * Machine's storage — runs, receipts, episodes (DECISIONS F09/F09r2,
+ * SOUL4-PLAN Phase 2, Episode@1 C0a→C0b).
+ *
+ * - runs: one row per soul_run; idempotency_key UNIQUE makes double-submit
+ *   return the same run; fencing_token + lease_until + attempt_count carry
+ *   the at-least-once/fencing semantics (worker mode arrives later, the
+ *   columns are the same contract).
+ * - receipts: narrow queryable columns (status pending|closed); the
+ *   contract-level ReceiptV1 fields (attempt, fencing_token, mode, actor,
+ *   tainted, contract status, evidence) live in the outcome JSON column and
+ *   are reassembled by kernel/runs.getReceiptView.
+ * - episodes: full Episode@1 causal-chain fields, outcome defaults PENDING,
+ *   bitemporal (occurred_at/recorded_at + outcome_observed_at back-fill).
+ */
+function createV10Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runs (
+      run_id TEXT PRIMARY KEY,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'queued',
+      task_contract TEXT NOT NULL,
+      budget TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      fencing_token TEXT NOT NULL,
+      lease_until TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+
+    CREATE TABLE IF NOT EXISTS receipts (
+      receipt_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(run_id),
+      status TEXT NOT NULL DEFAULT 'pending',
+      honesty_class TEXT NOT NULL DEFAULT 'self_attested',
+      issued_by TEXT NOT NULL DEFAULT 'coordinator',
+      created_at TEXT NOT NULL,
+      closed_at TEXT,
+      outcome TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_receipts_run ON receipts(run_id);
+    CREATE INDEX IF NOT EXISTS idx_receipts_pending ON receipts(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS episodes (
+      episode_id TEXT PRIMARY KEY,
+      occurred_at TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,
+      task_slice TEXT NOT NULL,
+      domain_raw TEXT,
+      recommendation_id TEXT,
+      policy_version TEXT,
+      offered TEXT,
+      acceptance TEXT NOT NULL DEFAULT 'unknown',
+      executed TEXT NOT NULL,
+      run_id TEXT,
+      attempt_id TEXT,
+      receipt_id TEXT,
+      verifier_result_id TEXT,
+      prediction TEXT,
+      cost TEXT NOT NULL,
+      outcome TEXT NOT NULL DEFAULT 'PENDING',
+      outcome_source TEXT,
+      outcome_observed_at TEXT,
+      eligibility INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_episodes_run ON episodes(run_id);
+    CREATE INDEX IF NOT EXISTS idx_episodes_receipt ON episodes(receipt_id);
+    CREATE INDEX IF NOT EXISTS idx_episodes_pending ON episodes(outcome) WHERE outcome = 'PENDING';
+  `);
+}
+
+/**
+ * v11 (Soul 4.0 Phase 3), all additive, under the same backup contract as
+ * every migration (VACUUM INTO snapshot before migrate): the declarative
+ * Skill-Registry (SOUL4-PLAN Phase 3, THREAT-MODEL TB5, DECISIONS F04/F07/F10).
+ *
+ * - skills: one row per (name, version); the full SkillManifest@1 JSON lives
+ *   in `manifest`, the narrow columns exist for deterministic selection
+ *   (lifecycle gate, compatibility match) without parsing every manifest.
+ *   Skill events go through the EXISTING ledger (skill.registered,
+ *   skill.lifecycle_changed, skill.revoked, pack.imported, pack.refused) —
+ *   no separate skill_events table, the ledger is the audit trail.
+ * - trusted_keys: TOFU key-pinning per SIGNED-PACK-TRUST §1/§5. Pinning is a
+ *   separate explicit user action (CLI), never implicit on import.
+ * - pack_versions: downgrade protection per SIGNED-PACK-TRUST §3 — the
+ *   highest imported pack_version per (publisher key_id, pack_name); equal or
+ *   lower incoming versions are refused fail-closed.
+ */
+function createV11Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS skills (
+      skill_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      manifest TEXT NOT NULL,
+      lifecycle_state TEXT NOT NULL DEFAULT 'shadow',
+      compatibility TEXT NOT NULL DEFAULT '{}',
+      source TEXT NOT NULL DEFAULT 'local',
+      publisher_key_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(name, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_skills_lifecycle ON skills(lifecycle_state);
+    CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+
+    CREATE TABLE IF NOT EXISTS trusted_keys (
+      key_id TEXT PRIMARY KEY,
+      pubkey TEXT NOT NULL,
+      pinned_at TEXT NOT NULL,
+      label TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS pack_versions (
+      key_id TEXT NOT NULL,
+      pack_name TEXT NOT NULL,
+      highest_version TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (key_id, pack_name)
+    );
+  `);
+}
+
+/**
+ * v12 (Soul 4.0, Sol-Gate Nacharbeit), all additive, under the same backup
+ * contract as every migration (VACUUM INTO snapshot before migrate): the
+ * defense-in-depth uniqueness indexes documented in the retryRun CAS comment
+ * (kernel/runs.ts, F03 Retry-Race). The CAS transaction already prevents two
+ * attempts with the same number; these indexes make the invariant hold at
+ * the storage layer even against a buggy future writer or a second process.
+ *
+ * - episodes(run_id, attempt_id): one episode per attempt. Both columns are
+ *   nullable in the v10 DDL (episodes can exist without a run), so the index
+ *   is partial — NULLs stay unconstrained.
+ * - receipts: the attempt number lives ONLY inside the outcome JSON
+ *   (v10 design: narrow columns + contract fields in outcome), so this is a
+ *   UNIQUE expression index on json_extract(outcome, '$.attempt'). No new
+ *   column, no data migration — closeRunWithFeedback spreads the old detail
+ *   into the closed outcome, so the attempt field survives closing. Partial:
+ *   receipts whose outcome carries no attempt (or is NULL) stay
+ *   unconstrained.
+ */
+function createV12Additions(db: Database.Database): void {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_run_attempt
+      ON episodes(run_id, attempt_id)
+      WHERE run_id IS NOT NULL AND attempt_id IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_run_attempt
+      ON receipts(run_id, json_extract(outcome, '$.attempt'))
+      WHERE json_extract(outcome, '$.attempt') IS NOT NULL;
   `);
 }
 

@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rut-02-modernize-legacy-syntax",
+  "cluster": "refactor-under-tests",
+  "skill_stage": 5,
+  "title": "Legacy-Syntax (var/arguments) unter grünen Tests modernisieren",
+  "description": "lib/report.mjs ist funktional korrekt, nutzt aber durchgehend var-Deklarationen und das arguments-Objekt. Die Testsuite ist grün und bleibt UNANGETASTET (der Verifier lehnt jede Test-Änderung ab). Auftrag: Refaktoriere lib/report.mjs auf modernes ESM-JavaScript: keine var-Deklarationen mehr, kein arguments-Objekt mehr (variadische Funktionen über Rest-Parameter), OHNE das Verhalten zu ändern. Die exportierte API muss exakt {makeReport, totalOf} bleiben, totalOf bleibt variadisch. Alle Tests müssen weiterhin grün sein. Der Verifier prüft mechanisch: Tests grün, kein var, kein arguments, Export-Oberfläche unverändert. Nur lib/report.mjs ändern, keine neuen Dateien.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/report.mjs", "kind": "source", "description": "modernisierte, verhaltensgleiche Implementierung" }
+  ],
+  "budget_hint": { "max_tokens": 20000, "max_wall_clock_s": 300, "max_cost_eur": 1, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

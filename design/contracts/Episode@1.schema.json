@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextool.app/soul/contracts/Episode@1.schema.json",
+  "title": "Episode@1",
+  "description": "Datenrückgrat des Cognition-Strangs — Status: C0a-Vertrag verbindlich (Cognition-r2 pass, SOL-LOG soul4-bundle-cognition-r2-1a-phase2) und C0b realisiert: Episoden werden seit Phase 2 ausschließlich von soul_run/soul_feedback emittiert (src/kernel/runs.ts), nie von v3-Bestandstools. Zugleich 1A-Exportvertrag mit PII-Klassifizierung pro Feld (SOUL4-PLAN 1A): jedes Property trägt 'x-pii' ∈ none (technisches Metadatum) | metadata (nutzerbezogenes Metadatum) | content_ref (referenziert Nutzerinhalt — Klartext nur wenn zwingend, Datenminimierung F07). Export-Default redigiert (F13); 'internal' ist eine Zugriffs-, keine Sensitivity-Klasse und ersetzt diese Klassifizierung nicht. Bitemporal: occurred_at/recorded_at plus outcome_observed_at als bitemporaler Nachtrag — Replays sind zeitkorrekt (Auswertung sieht nur Outcomes, die zum Replay-Zeitpunkt bekannt waren). Kausal-Verkettung (F03) ist Kern des Vertrags: Empfehlung → Annahme/Override → Ausführung → Receipt → Verifikation → Outcome. Invariante I1: self_attested zählt nie allein als Lernsignal. Epoch-Vertrag: policy_version + model_echo + recipe_version definieren Epochen; Statistiken werden nie stillschweigend über Epochen gemischt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "episode_id", "occurred_at", "recorded_at", "task_slice", "recommendation_id", "policy_version", "offered", "acceptance", "executed", "run_id", "attempt_id", "receipt_id", "verifier_result_id", "cost", "outcome", "outcome_observed_at", "eligibility"],
+  "properties": {
+    "contract": { "const": "Episode@1", "x-pii": "none" },
+    "episode_id": { "$ref": "#/$defs/id", "x-pii": "none" },
+    "occurred_at": { "$ref": "#/$defs/isoDateTime", "x-pii": "metadata" },
+    "recorded_at": { "$ref": "#/$defs/isoDateTime", "x-pii": "metadata" },
+    "task_slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "risk"],
+      "properties": {
+        "kind": { "enum": ["code_fix", "code_review", "research", "decision", "estimate", "content", "ops", "other"] },
+        "risk": { "enum": ["low", "high"], "description": "high = irreversibel / extern sichtbar / Ring ≥ 2." }
+      },
+      "description": "(C0a, Gate r2 ausstehend) Deterministische, grobe Taxonomie — KEINE LLM-Klassifikation im Schreibpfad (§3). Slices unter Mindest-N delegieren an den Eltern-Slice. Taxonomie-Erweiterung = versioniertes Constitution-Update.",
+      "x-pii": "none"
+    },
+    "domain_raw": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "taxonomy_version"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "taxonomy_version": { "type": "string", "maxLength": 20 }
+      },
+      "description": "(C0a, Gate r2 ausstehend) Versioniertes ROHMERKMAL — ausdrücklich KEINE Statistik-Achse (F06); wird erst nach Pilot/Power-Nachweis zur Achse.",
+      "x-pii": "metadata"
+    },
+    "recommendation_id": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "(C0a, Gate r2 ausstehend) Kausal-Verkettung F03: welche Empfehlung ausgesprochen wurde; null = keine Empfehlung lag vor.",
+      "x-pii": "none"
+    },
+    "policy_version": {
+      "type": ["string", "null"],
+      "maxLength": 50,
+      "description": "(C0a, Gate r2 ausstehend) Stand der Politik, die empfahl — Teil des Epoch-Vertrags; null nur wenn recommendation_id null.",
+      "x-pii": "none"
+    },
+    "offered": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["actor"],
+      "properties": {
+        "actor": { "enum": ["deep", "standard", "fast"] },
+        "recipe_id": { "type": ["string", "null"], "maxLength": 128 },
+        "context_recipe": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "memory_types": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 50 } },
+            "token_budget": { "type": "integer", "minimum": 0 }
+          }
+        }
+      },
+      "description": "(C0a, Gate r2 ausstehend) Wie EMPFOHLEN wurde {actor, recipe_id, context_recipe}; null = keine Empfehlung. Routing ist beratend, nie zwingend — es verleiht NIE Rechte (Invariante I7, Monotonie-Gesetz F06).",
+      "x-pii": "none"
+    },
+    "acceptance": {
+      "enum": ["accepted", "overridden", "unknown"],
+      "description": "(C0a, Gate r2 ausstehend) Ob der Client der Empfehlung folgte — das Override ist selbst ein Episode-Signal.",
+      "x-pii": "none"
+    },
+    "executed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor"],
+      "properties": {
+        "actor": {
+          "enum": ["deep", "standard", "fast", "unknown"],
+          "description": "Best-effort Echo vom Client; unknown ist zulässig und wird als unknown geführt (nie imputiert)."
+        },
+        "recipe_id": { "type": ["string", "null"], "maxLength": 128 },
+        "model_echo": { "type": ["string", "null"], "maxLength": 100, "description": "Tatsächlich antwortendes Modell falls bekannt — Teil des Epoch-Vertrags." },
+        "context_echo": { "type": ["object", "null"], "description": "Best-effort Echo der tatsächlichen Kapsel-Zusammensetzung." }
+      },
+      "description": "(C0a, Gate r2 ausstehend) Wie TATSÄCHLICH gelaufen — die zweite Hälfte der Kausal-Verkettung F03.",
+      "x-pii": "none"
+    },
+    "run_id": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Nullable Verweis auf den soul_run (C0b koppelt Episoden an die Run/Receipt-Maschinerie).", "x-pii": "none" },
+    "attempt_id": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "x-pii": "none" },
+    "receipt_id": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Nullable Verweis auf ReceiptV1.", "x-pii": "none" },
+    "verifier_result_id": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Nullable Verweis auf VerifierResult@1.", "x-pii": "none" },
+    "prediction": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["p", "statement_ref"],
+      "properties": {
+        "p": { "type": "number", "minimum": 0, "maximum": 1 },
+        "statement_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Hash/Referenz auf das Statement — Klartext nur wenn zwingend (Datenminimierung F07)."
+        }
+      },
+      "description": "(C0a, Gate r2 ausstehend) Abgegebene Vorhersage; null falls keine. Kalibrierungs-Ausgabe trägt später IMMER {p_raw, p_calibrated, calibration_n} (Invariante I3).",
+      "x-pii": "content_ref"
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens_est", "latency_ms", "attempts"],
+      "properties": {
+        "tokens_est": { "type": "integer", "minimum": 0 },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "attempts": { "type": "integer", "minimum": 1 }
+      },
+      "x-pii": "none"
+    },
+    "outcome": {
+      "enum": ["PENDING", "success", "failure", "mixed", "expired_unconfirmed", "cancelled_unobserved"],
+      "description": "PENDING bei Erzeugung; nachgetragen via soul_feedback, VerifierResult@1, Nutzer-Korrektur, Reaper-Timeout oder Cancel. expired_unconfirmed und cancelled_unobserved sind MISSINGNESS, keine Urteile (F03, I11) — Missingness wird berichtet, nie imputiert: expired_unconfirmed = Feedback blieb aus (Reaper-Timeout), cancelled_unobserved = der Run wurde explizit abgebrochen, bevor je ein Outcome beobachtet wurde. Beide sind TERMINAL (die Episode bleibt nicht ewig offen) und eligibility bleibt false. Outcome-Rangfolge: verifier > user > self_attested nur für Eligibility, nie zur Überschreibung eines expliziten User-Urteils.",
+      "x-pii": "none"
+    },
+    "outcome_source": {
+      "enum": ["verifier", "user", "self_attested", "expired_unconfirmed", "cancelled"],
+      "description": "Pflicht, sobald outcome nicht mehr PENDING ist (analog Receipt-Vertrag F09r2). user-Outcome = explizite Bestätigung/Korrektur, NICHT Schweigen. 'cancelled' gehört ausschließlich zu outcome=cancelled_unobserved (expliziter Abbruch — Quelle der Missingness, kein Urteil). Invariante I1: self_attested zählt nie allein als Lernsignal.",
+      "x-pii": "none"
+    },
+    "outcome_observed_at": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+      "description": "Bitemporaler Nachtrag: wann das Outcome bekannt wurde. null solange PENDING. Replays sehen nur Outcomes, die zum Replay-Zeitpunkt bekannt waren.",
+      "x-pii": "metadata"
+    },
+    "eligibility": {
+      "type": "boolean",
+      "description": "Ob diese Episode in Statistik einfließen darf — z.B. false bei unknown-Ausführung für Actor-Vergleiche. Kompetenzkarte rechnet nur über eligibility=true mit definiertem binärem Outcome (C1a).",
+      "x-pii": "none"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "enum": ["success", "failure", "mixed", "expired_unconfirmed", "cancelled_unobserved"] } }, "required": ["outcome"] },
+      "then": {
+        "required": ["outcome_source"],
+        "properties": { "outcome_observed_at": { "type": "string" } },
+        "description": "Ein abgeschlossenes Outcome ohne outcome_source oder ohne outcome_observed_at ist invalid."
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "PENDING" } }, "required": ["outcome"] },
+      "then": {
+        "not": { "required": ["outcome_source"] },
+        "properties": { "outcome_observed_at": { "type": "null" } },
+        "description": "PENDING trägt nie eine outcome_source und nie einen Beobachtungszeitpunkt."
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "expired_unconfirmed" } }, "required": ["outcome"] },
+      "then": {
+        "properties": { "outcome_source": { "const": "expired_unconfirmed" } },
+        "description": "Reaper-Timeout: Quelle ist zwingend expired_unconfirmed — Missingness, kein Urteil."
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "cancelled_unobserved" } }, "required": ["outcome"] },
+      "then": {
+        "properties": { "outcome_source": { "const": "cancelled" } },
+        "description": "Expliziter Abbruch: Quelle ist zwingend cancelled — Missingness, kein Urteil; outcome_observed_at ist der Cancel-Zeitpunkt (wann die Missingness terminal wurde), eligibility bleibt false."
+      }
+    },
+    {
+      "if": { "properties": { "outcome_source": { "const": "cancelled" } }, "required": ["outcome_source"] },
+      "then": {
+        "properties": { "outcome": { "const": "cancelled_unobserved" } },
+        "description": "Umkehrrichtung: die Quelle cancelled kann nie ein echtes Urteil (success/failure/mixed) tragen."
+      }
+    },
+    {
+      "if": { "properties": { "executed": { "properties": { "actor": { "const": "unknown" } }, "required": ["actor"] } }, "required": ["executed"] },
+      "then": {
+        "properties": { "eligibility": { "const": false } },
+        "description": "F06: executed.actor=unknown kann in keiner Actor-Statistik zählen — eligibility ist dann zwingend false (nie imputieren)."
+      }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "isoDateTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" }
+  },
+  "examples": [
+    {
+      "contract": "Episode@1",
+      "episode_id": "ep-2026-07-16-0001",
+      "occurred_at": "2026-07-16T12:00:00Z",
+      "recorded_at": "2026-07-16T12:00:01Z",
+      "task_slice": { "kind": "code_fix", "risk": "low" },
+      "domain_raw": { "value": "mcp-server", "taxonomy_version": "1" },
+      "recommendation_id": "rec-2026-07-16-0001",
+      "policy_version": "policy-2026-07-01",
+      "offered": {
+        "actor": "standard",
+        "recipe_id": "retrieve-counterhypothesis-toolcheck-synthesis@1",
+        "context_recipe": { "memory_types": ["error", "solution"], "token_budget": 2000 }
+      },
+      "acceptance": "accepted",
+      "executed": {
+        "actor": "standard",
+        "recipe_id": "retrieve-counterhypothesis-toolcheck-synthesis@1",
+        "model_echo": "claude-sonnet-5",
+        "context_echo": { "memory_types": ["error", "solution"], "token_budget": 1850 }
+      },
+      "run_id": "run-2026-07-16-0001",
+      "attempt_id": "run-2026-07-16-0001.a1",
+      "receipt_id": "rcpt-2026-07-16-0001",
+      "verifier_result_id": "vr-2026-07-16-0001",
+      "prediction": { "p": 0.8, "statement_ref": "sha256:1c0ffee0aa11bb22cc33dd44ee55ff667788990011223344556677889900aabb" },
+      "cost": { "tokens_est": 48100, "latency_ms": 184000, "attempts": 1 },
+      "outcome": "success",
+      "outcome_source": "verifier",
+      "outcome_observed_at": "2026-07-16T12:03:09Z",
+      "eligibility": true
+    }
+  ]
+}

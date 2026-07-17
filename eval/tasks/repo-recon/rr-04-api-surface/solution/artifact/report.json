@@ -1,0 +1,7 @@
+{
+  "surface": [
+    { "name": "parseCsv", "defined_in": "src/csv.mjs" },
+    { "name": "toTable", "defined_in": "src/table.mjs" }
+  ],
+  "internal_exports": [{ "name": "_pad", "defined_in": "src/table.mjs" }]
+}

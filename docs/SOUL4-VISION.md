@@ -1,12 +1,28 @@
-# Soul 4.0 — Vision v3 (Stand 2026-07-16, nach zwei Sol-Gates)
+# Soul 4.0 — Vision v3 (Stand 2026-07-17, nach Freeze r3 + Baustart)
 
-> Status: Phase 0 ist abgeschlossen bis auf das Re-Gate (r2). Alle Artefakte
+> Status: Phase 0 abgeschlossen (r3 bestanden 2026-07-16). Alle Artefakte
 > liegen vor: AUDIT-3.1.0, RESTORE-PROBE, API-MATRIX (V10/V13/V21 seither
 > getestet), THREAT-MODEL v1.1, SOUL4-PLAN v2, SOUL4-DECISIONS (F01–F10
-> ausgearbeitet). Basis ist soul-mcp **3.2.0** (Suite aktuell 107 Tests): Import-Screening,
+> ausgearbeitet). Basis ist soul-mcp **3.2.0** (107 Tests am r3-Freeze-Stand): Import-Screening,
 > Checksum fail-closed, echte Löschsemantik, Import-DoS-Guard,
 > PassportEnvelope@3-Reader (Forward-Kompat).
-> **Freeze-Scope:** Phasen 1–3 verbindlich nach r2-PASS; Phasen 4–5 Richtplan
+>
+> **Baustand (2026-07-17):** Phase 1A gebaut (8 Schemas in `design/contracts/`,
+> Eval-Protokoll als Preregistration-als-Code in `eval/protocol/`,
+> SignedPack-Trust); offen: Varianz-Pilot/Dry-Run (in Arbeit, `eval/pilot/`)
+> + formale 1A-Abnahme. Phase 1B: 20 hermetische Aufgaben committed
+> (`eval/tasks/`, 5 Familien × 4); Baseline-Messung offen. Phase 2: Wellen A+B
+> gebaut — `soul_run` im Kontextmodus mit durabler State Machine, Receipt-
+> Vertrag, Retry/Cancel/Resume, Chaos-Testmatrix; Worker/RunnerAdapter
+> (`soul-worker`) weiterhin NICHT gebaut. Phase 3: Skill-Registry gebaut
+> (Migration v11, Lifecycle, Pack-Import, CLI `soul-mcp skill …` — kein neues
+> Tool); Recipe-Registry (Cognition C2a) NICHT gebaut. Cognition-Strang: C0a
+> in Episode@1 realisiert, C0b in soul_run realisiert, C1a+ NICHT gebaut.
+> Suite: 349 Tests grün (`node --test`, 24 Dateien, ohne eval-pilot),
+> Stand 2026-07-17. Messungen (Arme A–E) stehen aus — Akzeptanzkriterien
+> unberührt.
+>
+> **Freeze-Scope:** Phasen 1–3 verbindlich (r3-PASS); Phasen 4–5 Richtplan
 > (Schärfung nach Phase-3-Gate). Rollen: dieses Dokument = warum/was;
 > SOUL4-PLAN = Deliverables/Akzeptanz/Gates; THREAT-MODEL = bindende Grenzen;
 > SOUL4-DECISIONS = Design-Antworten auf die Gate-Befunde.
@@ -85,8 +101,11 @@ soul-forge     (PHASE 5, separates experimentelles Paket)
 
 ### Öffentliche API (Sol F03)
 Der v3-Server registriert bereits 22 Tools. 4.0 fügt **genau ein** Tool
-hinzu: `soul_run`. `soul_feedback` und `soul_status` werden nur additiv
-erweitert. `soul_review` ist gestrichen (Workbench/Resolve/Review-Queue
+hinzu: `soul_run` *(Baustand: registriert und getestet — der Server führt
+jetzt 23 Tools)*. `soul_feedback` und `soul_status` werden nur additiv
+erweitert *(Baustand: `soul_feedback` erweitert — run_id/outcome/evidence_ref;
+`soul_status` noch NICHT erweitert, Run-/Skill-Kennzahlen stehen aus)*.
+`soul_review` ist gestrichen (Workbench/Resolve/Review-Queue
 decken das ab). Phase-0-Deliverable: versionierte API-Matrix
 (neu / erweitert / unverändert / deprecated).
 
@@ -111,9 +130,10 @@ deprecated Sampling zugunsten von MRTR — beides Adapter-Territorium)
 
 ## 5. Phasenplan (Sol F02-Schnitt)
 
-**Phase 0 — Freeze, Forensik, Verträge der Realität** *(läuft)*
+**Phase 0 — Freeze, Forensik, Verträge der Realität** *(abgeschlossen, r3-PASS 2026-07-16)*
 - v3.1-Freeze + Audit: erledigt, siehe docs/AUDIT-3.1.0.md (3 P1, 4 P2,
-  7 Behauptungen widerlegt). P1/P2-Fixes: erledigt in 3.2.0 (106+ Tests).
+  7 Behauptungen widerlegt). P1/P2-Fixes: erledigt in 3.2.0 (107 Tests am
+  r3-Freeze-Stand; die Suite wächst seither mit den 1A-Deliverables).
 - Restore-Probe (Backup→Restore→Verify end-to-end).
 - Client-Capability-Matrix (Claude Code: kein Sampling, Elicitation ja,
   keine Server-Reaktivierung — erhoben 2026-07-16).
@@ -126,7 +146,9 @@ deprecated Sampling zugunsten von MRTR — beides Adapter-Territorium)
 - Backlog-Übernahme: soul_reflect→soul_timeline-Regressionstest (aus Gate
   soul-310-release-r3, deferred).
 
-**Phase 1 — Messbarkeit** (Sol F09: geteilt)
+**Phase 1 — Messbarkeit** (Sol F09: geteilt) *(Baustand: 1A-Schemas +
+Protokoll + Aufgaben gebaut; Varianz-Pilot/Dry-Run in Arbeit, Baseline-Messung
+und formale Abnahme offen)*
 - **1A Messprotokoll & Artefaktverträge:** TaskContract, SkillManifest,
   ReceiptV1, VerifierResult, CapabilityManifest; Statistik-Protokoll
   (Mehrfachläufe, gepaarte Aufgaben, Konfidenzintervalle, vorab fixierte
@@ -145,6 +167,9 @@ Nur zwei Strategien: `direct` und `plan_execute_verify`. Ein neues Tool:
 `soul_run` (mit State Machine). Context Compiler mit hartem Budget und
 Begründung pro Baustein. RunnerAdapter-Interface + genau ein Adapter.
 Gemessen gegen Phase-1-Baselines; keine Freigabe ohne Signal in Arm C/D vs. B.
+*(Baustand: Kontextmodus gebaut — State Machine, Receipt-Vertrag,
+Retry/Cancel/Resume, Chaos-Matrix; RunnerAdapter/`soul-worker` NICHT gebaut;
+Messung gegen Baselines steht aus.)*
 
 **Phase 3 — Declarative Skill-Registry**
 Lifecycle: Shadow → Canary → Promoted → Deprecated → Revoked (Sol F11).
@@ -152,6 +177,11 @@ Promotion nur auf unabhängigen Aufgaben + Compatibility Vector
 (OS, Tools, Versionen, Kontextbudget — nicht nur "Modell"). Abhängigkeiten,
 Konfliktauflösung, SemVer, Environment-Fingerprint, Rollback inkl. laufender
 Runs. Genau 5 Skills: die Code-Fähigkeitsleiter passend zum Phase-1-Benchmark (SOUL4-PLAN §3, DECISIONS F04); Content-Skills folgen in Phase 4.
+*(Baustand: Registry-Maschinerie gebaut — Migration v11, Lifecycle-Leiter,
+Screening/Positiv-Grammatik, SignedPack-Import mit TOFU-Pinning,
+Kapsel-Exposition ≤3 promoted, CLI `soul-mcp skill …`; Promotion-Zyklus mit
+echten Eval-Daten und D/E-Messung stehen aus — Recipe-Registry (C2a) NICHT
+gebaut, wartet auf eigenes Gate.)*
 
 **Phase 4 — Breite**
 Recherche- und Dokument-Aufgabenklassen (mit den in 1A definierten, dann

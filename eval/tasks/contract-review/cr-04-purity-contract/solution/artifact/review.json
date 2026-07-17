@@ -1,0 +1,8 @@
+{
+  "verdict": "reject",
+  "violations": [
+    { "rule": "R1", "symbol": "topN" },
+    { "rule": "R2", "symbol": "computeStats" },
+    { "rule": "R3", "symbol": "summarize" }
+  ]
+}

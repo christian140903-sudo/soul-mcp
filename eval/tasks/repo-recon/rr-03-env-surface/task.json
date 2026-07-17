@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rr-03-env-surface",
+  "cluster": "repo-recon",
+  "skill_stage": 1,
+  "title": "Konfigurations-Oberfläche (env-Keys) eines Moduls erfassen",
+  "description": "Das Modul src/server-config.mjs liest seine Konfiguration aus einem env-Objekt. Erfasse die vollständige Konfigurations-Oberfläche und schreibe artifact/report.json mit EXAKT diesem Feld: env_keys: Liste von Objekten {name, required, default}. name = der Key-Name; required = true, wenn das Fehlen des Keys einen Fehler auslöst, sonst false; default = der Default-Wert als String, oder null wenn es keinen Default gibt. Listen-Reihenfolge ist egal (der Verifier sortiert).",
+  "task_slice": { "kind": "research", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "artifact/report.json", "kind": "json", "description": "env_keys-Inventar mit name/required/default" }
+  ],
+  "budget_hint": { "max_tokens": 8000, "max_wall_clock_s": 120, "max_cost_eur": 0.5, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

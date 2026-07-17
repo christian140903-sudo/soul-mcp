@@ -1,0 +1,13 @@
+{
+  "test_files": ["test/limits.test.mjs", "test/stack.test.mjs"],
+  "tests": {
+    "test/stack.test.mjs": [
+      "push increases size",
+      "pop returns last pushed",
+      "pop on empty throws",
+      "peek does not remove"
+    ],
+    "test/limits.test.mjs": ["capacity is enforced", "clear empties the stack"]
+  },
+  "total": 6
+}

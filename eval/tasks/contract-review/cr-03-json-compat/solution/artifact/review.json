@@ -1,0 +1,7 @@
+{
+  "verdict": "reject",
+  "violations": [
+    { "rule": "R1", "symbol": "serializeEvent" },
+    { "rule": "R2", "symbol": "serializeEvent" }
+  ]
+}

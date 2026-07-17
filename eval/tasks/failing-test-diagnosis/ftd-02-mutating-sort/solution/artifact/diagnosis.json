@@ -1,0 +1,11 @@
+{
+  "defect_file": "lib/ranking.mjs",
+  "defect_function": "topScores",
+  "category": "input_mutation",
+  "trigger": {
+    "args": [[10, 50, 30], 2],
+    "observed": "first_arg_after_call",
+    "expected": [10, 50, 30],
+    "actual": [50, 30, 10]
+  }
+}

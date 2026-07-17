@@ -46,7 +46,27 @@ export type EventType =
   | 'memory.verified'
   | 'session.started'
   | 'session.ended'
-  | 'memory.consolidated';
+  | 'memory.consolidated'
+  | 'run.created'
+  | 'run.status_changed'
+  | 'run.resumed'
+  | 'run.retry_refused'
+  | 'receipt.issued'
+  | 'receipt.closed'
+  | 'episode.recorded'
+  | 'episode.outcome_recorded'
+  | 'skill.registered'
+  | 'skill.refused'
+  | 'skill.lifecycle_changed'
+  | 'skill.transition_refused'
+  | 'skill.revoked'
+  | 'pack.imported'
+  | 'pack.refused'
+  | 'key.pinned'
+  // Written by eval/protocol/hash.mjs (preregistration-as-code, F05) via
+  // direct SQL against the same events table — listed here so the union
+  // stays the single source of truth for every event type on the ledger.
+  | 'eval.protocol_registered';
 
 export interface SoulEvent {
   seq: number;

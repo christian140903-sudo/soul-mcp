@@ -1,5 +1,160 @@
 # Changelog
 
+## 4.0.0 — 2026-07-17
+
+v4 turns work into verified capability — that is the goal: model compute
+becomes durable, verified, portable capability capital; every expensive,
+successful run should leave an asset behind, not just an answer. 4.0.0 ships
+the machinery (durable runs, episode ledger, skill registry, preregistered
+eval protocol) and deliberately not the capability claims: **model
+measurements have not run** (see "Honest limits").
+
+Schema v9 → v12 in three additive migrations (v10 runs/receipts/episodes ·
+v11 skills/trusted_keys/pack_versions · v12 unique indexes per (run,
+attempt)), each automatic with a verified backup first (`VACUUM INTO` +
+`integrity_check`).
+
+**Breaking changes: none for the 22 v3 tools.** Their contracts are pinned by
+golden-contract tests over the real MCP path (six user-authority tools,
+disputed-capsule delivery, feedback semantics) and the full suite is green at
+this release. `soul_feedback` and `soul_context` are extended additively —
+calls without the new parameters behave exactly as in 3.1/3.2. Major bump
+because 4.0 adds a new public surface (a tool, a subsystem, a CLI area), not
+because anything old broke.
+
+### Added
+- **`soul_run` — the only new tool, per contract** (API-MATRIX Tabelle A).
+  Compiles free text deterministically into a `TaskContract@1` and opens a
+  durable run in **context mode**: the server never spawns anything, the host
+  model executes in the conversation. Run, pending receipt and PENDING
+  episode are created **synchronously in one transaction**. Honesty classes
+  in the schema: the receipt is `self_attested` and stays `self_attested` —
+  `evidence_ref` is carried as an auditable reference and does NOT upgrade
+  the class; `deterministic_verified` would require a validated
+  `VerifierResult@1`, which 4.0 does not produce, so it is never issued.
+  Idempotency (`idempotency_key` → same run, never a duplicate), lifecycle
+  actions `cancel` / `resume` / `retry` (new attempt with new fencing token,
+  receipt and episode, capped by `budget.max_attempts`; CAS allows exactly
+  one retry winner), states queued/running/succeeded/failed/cancelled plus
+  reaper expiry: an unclosed run becomes `expired_unconfirmed` after
+  `SOUL_RECEIPT_TTL_DAYS` (default 7) — missingness, not a verdict.
+  **Chaos matrix:** 5 SIGKILL edge cases (before first run, right after the
+  reply, amid pipelined flood, after feedback close, during the reaper
+  sweep), each asserting DB invariants after restart — no orphans, no double
+  close (`test/chaos.test.mjs`).
+- **Episode ledger (`Episode@1`):** every run books a bitemporal
+  (decision, confidence, outcome) triple with the causal chain
+  recommendation → acceptance → execution → outcome and two clocks
+  (occurred_at vs. recorded_at; outcomes back-fill honestly). Missingness is
+  strictly separated from failure — `expired_unconfirmed` and unknown
+  execution are reported, never imputed. Emitted at exactly one place, the
+  `soul_run`/receipt boundary; the 22 v3 tools emit no episodes.
+- **Skill registry (declarative-only), schema v11.** Skills are data, never
+  code: positive grammar of typed blocks, fail-closed screening (length
+  caps, secret/URL deny, monotonicity law — a skill can never grant rights).
+  Lifecycle ladder with code guards Shadow → Canary → Promoted → Deprecated
+  → Revoked; every skill starts in shadow, promotion requires an evidence
+  reference, revocation sweeps open runs. **Ed25519-signed packs** with
+  trust-on-first-use key pinning — pinning is an explicit user action, never
+  implicit on import; downgrade, replay and tampering are refused; one bad
+  manifest refuses the whole pack. Capsule exposure: at most **3**
+  task-scoped *promoted* skills, deterministically matched; shadow/canary
+  never exposed; without a match the capsule is byte-identical to the
+  pre-skills contract.
+- **CLI `skill` subcommand area** (no new MCP tool for registry management,
+  by design): `skill list` · `skill register <manifest.json>` ·
+  `skill transition <name> <to>` · `skill promote <name> --evidence <ref>` ·
+  `skill revoke <name>` · `skill import <pack.json>` · `skill pin <pack.json>`.
+- **8 artifact contracts** in `design/contracts/` — `TaskContract@1`,
+  `SkillManifest@1`, `ReceiptV1`, `VerifierResult@1`, `CapabilityManifest@1`,
+  `Episode@1`, `AuthorityEnvelope@1`, `SignedPackEnvelope@1` — with an
+  anti-drift test pinning runtime copies byte-equal to the contract files.
+- **Eval preregistration as code** (`eval/protocol/`): protocol document,
+  machine-readable constants and statistics implementation under one
+  registered hash — any change is a visible revision that discards the
+  running wave. Confirmatory statistics (paired bootstrap p-values, Holm
+  correction over the 4-comparison family, resamples and alpha fixed in
+  `protocol.json`) are wired into a deterministic gate function and proven
+  **mechanically** end-to-end: a fixture-vs-reference dry run through
+  applyITT → bootstrap → Holm → gate (`eval/pilot/DRY-RUN-REPORT.md` — a
+  pipeline function proof, explicitly not a model comparison), plus a
+  variance-pilot harness (30 real verifier process runs, 3 tasks × 5
+  repeats × 2 arms; verifier determinism confirmed, power-calculation path
+  implemented — `eval/pilot/PILOT-REPORT.md`).
+- **20 hermetic eval tasks** (`eval/tasks/`, 5 families × 4): a
+  code-capability ladder — repo recon, failing-test diagnosis, minimal fix
+  with regression test, refactor under tests, contract review — each with
+  **counterfactual verifiers** (must fail the untouched fixture, must pass
+  the reference solution). This is the open baseline set; held-out gate sets
+  deliberately live elsewhere.
+- **Import size guard:** `soul_import` refuses payloads over 50 MB (default,
+  `SOUL_MAX_IMPORT_BYTES`) before parsing — availability guard from the
+  threat model (TB3). Shipped alongside the 3.2.0 envelope reader but never
+  changelogged; recorded here.
+
+### Changed
+- **`soul_feedback` — additive extension.** New optional parameters
+  `run_id`, `outcome` (success|failure|mixed — required when `run_id` is
+  set), `evidence_ref`, `summary`. With `run_id` it closes the pending
+  receipt and back-fills the episode outcome bitemporally. `context_id` is
+  now optional — at least one of `context_id`/`run_id` is required. Calls
+  without `run_id` behave exactly as in 3.1.
+- **`soul_context` — additive extension.** Optional `skills` capsule
+  section: ≤3 task-scoped promoted skills, deterministic matching; without a
+  match the key is absent and the capsule is byte-identical to the
+  pre-skills contract (golden tests hold).
+- DB schema v9 → v12 (see above); `soul_run` and skill events append to the
+  same single ledger.
+
+### Unchanged contracts
+- All 22 v3 tools: contracts unchanged, golden transcripts green
+  (`test/golden-contracts.test.mjs` and full suite at this release).
+- `docs/API-MATRIX.md` documents 29 behavior contracts V1–V29, each with the
+  test that holds it: V1–V24 (the v2/v3 surface) hold unchanged; V25–V29 pin
+  the new run/skill surface.
+- Passport: the writer still exports format 2.0.0 (golden test pins it); the
+  sectioned `PassportEnvelope@3` is read fail-closed (since 3.2.0 — unknown
+  required section → refusal, unknown optional → skip with report). Pre-4.0
+  passports import unchanged; the envelope **writer** is not built yet.
+- Resources (8 static + 1 template) and prompts (3): unchanged.
+
+### Security
+- Threat-model-driven (docs/THREAT-MODEL.md v1.1): skills are untrusted
+  typed data, never code; the server never spawns; a compromised OS is
+  explicitly out of scope.
+- Skill screening fail-closed: positive grammar, secret/URL deny, length
+  limits, lifecycle claims normalized to shadow, monotonicity law (no
+  grant). Pack import only signed + pinned; downgrade/replay/tamper refused.
+- TOFU pinning is a deliberate user action (`skill pin`), never implicit.
+- Import DoS guard (50 MB cap before parse), on top of the 3.2.0 screening
+  and fail-closed checksums.
+
+### Honest limits (what 4.0.0 does NOT contain)
+- **No worker/RunnerAdapter.** Context mode only; `soul-worker` is a
+  designed but unbuilt separate package. The server never spawns.
+- **No recipe registry** (Cognition C2a) — waits behind its own gate.
+- **No competence maps, no routing recommendations** (C1a+) — they need
+  real, causally linked episodes first. The stated goal of the strand:
+  *soul trainiert keine Modelle; es lernt eine auditierbare
+  Entscheidungspolitik darüber, welches Modell mit welchem Kontext und
+  welchem Verfahren wann eingesetzt wird* — 4.0.0 builds the data backbone;
+  the policy learning is not in this release.
+- **No model benchmarks.** The eval infrastructure exists and is
+  preregistered; the measurements (arms A–E) are outstanding. This release
+  makes no claim about making any model better at anything.
+- **Skill promotion checks evidence structure, not evidence truth** — the
+  registry makes a bad promotion auditable, not impossible.
+- **`deterministic_verified` is never issued** in 4.0.
+- **`soul_status`** does not yet report run/skill metrics (planned additive).
+
+### Tests
+- 107 (3.2.0 at the r3 freeze) → **355**, green via `node --test` across 26
+  test files (run 2026-07-17; the counter includes subtests). Among them:
+  the 5-case SIGKILL chaos matrix, 15 run-lifecycle cases (retry race,
+  double cancel, expired lease), registry/pack negative tests, the
+  eval-protocol and pilot-harness suites, and a v9→current migration test on
+  a real database copy.
+
 ## 3.2.0 — 2026-07-16
 
 Schema v9 (additive, automatic migration with verified backup). Security and

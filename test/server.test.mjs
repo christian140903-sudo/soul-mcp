@@ -64,7 +64,7 @@ test('the default binary invocation serves MCP: initialize, list tools, call a t
       clientInfo: { name: 'soul-test', version: '0.0.0' },
     });
     assert.equal(init.result.serverInfo.name, 'soul');
-    assert.match(init.result.serverInfo.version, /^3\./);
+    assert.match(init.result.serverInfo.version, /^4\./);
     assert.ok(
       typeof init.result.instructions === 'string' && init.result.instructions.includes('soul_context'),
       'server serves its session protocol via the instructions field'

@@ -1,0 +1,16 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "mfr-01-interval-overlap",
+  "cluster": "minimal-fix-with-regression-test",
+  "skill_stage": 3,
+  "title": "Intervall-Überlappung: Randfall fixen + Regressionstest",
+  "description": "lib/interval.mjs enthält overlaps(a, b) für halboffene Intervalle {start, end}. Beobachteter Fehler: Intervalle, die sich nur BERÜHREN (a.end === b.start), werden fälschlich als überlappend gemeldet — {start:0,end:5} und {start:5,end:9} überlappen NICHT. Die bestehende Testsuite ist grün, weil sie diesen Randfall nicht abdeckt. Auftrag: (1) Fixe den Defekt MINIMAL — es darf ausschließlich lib/interval.mjs geändert werden; die bestehenden Tests bleiben unangetastet und müssen grün bleiben. (2) Lege test/regression.test.mjs an: einen Test, der auf dem ALTEN (ungefixten) Code fehlschlägt und auf dem gefixten besteht. Der Verifier prüft beides mechanisch (er spielt dafür den Originalcode zurück). Keine weiteren Dateien anlegen.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/interval.mjs", "kind": "source", "description": "minimal gefixte Implementierung" },
+    { "path": "test/regression.test.mjs", "kind": "test", "description": "Regressionstest, der vorher rot war" }
+  ],
+  "budget_hint": { "max_tokens": 16000, "max_wall_clock_s": 240, "max_cost_eur": 0.8, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

@@ -1,0 +1,8 @@
+{
+  "verdict": "reject",
+  "violations": [
+    { "rule": "R1", "symbol": "readUser" },
+    { "rule": "R2", "symbol": "saveUser" },
+    { "rule": "R3", "symbol": "deleteUser" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "verdict": "reject",
+  "violations": [
+    { "rule": "R1", "symbol": "toCsv" },
+    { "rule": "R2", "symbol": "parseRow" }
+  ]
+}

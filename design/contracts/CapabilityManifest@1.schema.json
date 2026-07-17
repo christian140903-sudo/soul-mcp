@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextool.app/soul/contracts/CapabilityManifest@1.schema.json",
+  "title": "CapabilityManifest@1",
+  "description": "Was ein RunnerAdapter faktisch kann und darf (THREAT-MODEL TB6). Adapter-Binary per DIGEST gepinnt, nicht Versionsstring (DECISIONS F05: 'ein auto-updatender CLI-Client ist sonst eine wandernde Trust-Basis'). Effektive Rechte eines Runs = Schnittmenge(AuthorityEnvelope, Adapter-Capabilities, Constitution) (F06) — dieses Manifest ist der zweite Faktor der Schnittmenge und verleiht selbst keine Rechte über den Envelope hinaus. Tool-Netzwerk per Default LEER; Provider-Endpunkte sind eine EIGENE Allowlist, getrennt vom Tool-Netz (TB6b). Harte Limits werden im Wrapper enforced, nicht im Prompt (TB6). Der Worker ist ein separates Paket — der MCP-Server spawnt nie.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "adapter_name", "adapter_version", "binary_digest", "capabilities", "limits"],
+  "properties": {
+    "contract": { "const": "CapabilityManifest@1" },
+    "adapter_name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "adapter_version": { "$ref": "#/$defs/semver" },
+    "binary_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Digest-Pinning (F05/TB6): das Adapter-Binary wird über diesen Hash identifiziert; ein Versionsstring ist hier bewusst INVALID."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tools", "network_allowlist", "provider_endpoints"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": "Restriktive Tool-Whitelist (TB6)."
+        },
+        "read_paths": { "type": "array", "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+        "write_paths": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "description": "Attempt-scoped Arbeitsverzeichnisse (TB6/F09); Commit nur mit gültigem Fencing-Token."
+        },
+        "network_allowlist": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "description": "Tool-Netzwerk per Default LEER (TB6). Pflichtfeld, damit Leere eine explizite Aussage ist, kein Vergessen."
+        },
+        "provider_endpoints": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "description": "EIGENE Allowlist für Modellprovider-Endpunkte, strikt getrennt vom Tool-Netz (TB6b/F05). Die Datenklassen-Schleuse (secret verlässt die Maschine nie, personal nur mit User-Grant, Redaction-Pass) sitzt VOR jedem Call an diese Endpunkte."
+        },
+        "secrets_in_env": {
+          "const": false,
+          "description": "Keine Secrets im Worker-Env (TB6). Konstant false — ein Manifest, das etwas anderes behauptet, ist invalid."
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_processes", "max_disk_mb", "max_output_bytes", "max_wall_clock_s", "max_cost_eur"],
+      "properties": {
+        "max_processes": { "type": "integer", "minimum": 1 },
+        "max_disk_mb": { "type": "integer", "minimum": 1 },
+        "max_output_bytes": { "type": "integer", "minimum": 1 },
+        "max_wall_clock_s": { "type": "integer", "minimum": 1 },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "max_turns": { "type": "integer", "minimum": 1 },
+        "max_cost_eur": { "type": "number", "minimum": 0 }
+      },
+      "description": "Harte Limits im Wrapper enforced (F05/TB6: Prozesse, Disk, Output-Bytes, Wanduhrzeit, EUR — alle fünf Pflicht; Turns/Tokens zusätzlich möglich)."
+    },
+    "created_at": { "$ref": "#/$defs/isoDateTime" }
+  },
+  "$defs": {
+    "semver": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "isoDateTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" }
+  },
+  "examples": [
+    {
+      "contract": "CapabilityManifest@1",
+      "adapter_name": "claude-cli",
+      "adapter_version": "1.0.0",
+      "binary_digest": "sha256:9f2b4a1c8d3e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4",
+      "capabilities": {
+        "tools": ["bash:npm-test", "fs:read", "fs:write"],
+        "read_paths": ["${ATTEMPT_WORKDIR}"],
+        "write_paths": ["${ATTEMPT_WORKDIR}"],
+        "network_allowlist": [],
+        "provider_endpoints": ["https://api.anthropic.com"],
+        "secrets_in_env": false
+      },
+      "limits": {
+        "max_processes": 8,
+        "max_disk_mb": 512,
+        "max_output_bytes": 10485760,
+        "max_wall_clock_s": 1800,
+        "max_tokens": 500000,
+        "max_turns": 40,
+        "max_cost_eur": 5
+      },
+      "created_at": "2026-07-16T12:00:00Z"
+    }
+  ]
+}

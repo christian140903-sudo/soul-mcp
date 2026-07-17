@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rut-01-deduplicate-validation",
+  "cluster": "refactor-under-tests",
+  "skill_stage": 5,
+  "title": "Dreifach duplizierte Validierungslogik unter grünen Tests deduplizieren",
+  "description": "lib/validate.mjs enthält drei Validatoren (validateUser, validateOrder, validateProduct), die denselben Basis-Block (id- und revision-Prüfung) dreifach kopiert enthalten. Die Testsuite ist grün und bleibt UNANGETASTET (der Verifier lehnt jede Test-Änderung ab). Auftrag: Refaktoriere lib/validate.mjs so, dass der duplizierte Basis-Block nur noch EINMAL im Code steht (z. B. als interne Hilfsfunktion), OHNE das Verhalten zu ändern. Die exportierte API muss exakt {validateUser, validateOrder, validateProduct} bleiben — keine neuen Exports. Alle Tests müssen weiterhin grün sein. Der Verifier prüft mechanisch: Tests grün, die charakteristischen Prüfzeilen kommen höchstens je 1× vor, Export-Oberfläche unverändert. Nur lib/validate.mjs ändern, keine neuen Dateien.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/validate.mjs", "kind": "source", "description": "deduplizierte, verhaltensgleiche Implementierung" }
+  ],
+  "budget_hint": { "max_tokens": 20000, "max_wall_clock_s": 300, "max_cost_eur": 1, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

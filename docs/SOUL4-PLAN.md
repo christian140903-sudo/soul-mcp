@@ -11,12 +11,30 @@
 > mit echten Varianz-/Kostendaten geschärft und erst dann eingefroren —
 > Pseudo-Präzision heute wäre Theater.
 
+## Baustand (2026-07-17 — Status, keine Änderung an Deliverables/Akzeptanz)
+
+| Baustein | Status |
+|---|---|
+| 1A Schemas | ✓ gebaut — 8 Schemas in `design/contracts/` (TaskContract@1, SkillManifest@1, ReceiptV1, VerifierResult@1, CapabilityManifest@1, Episode@1, AuthorityEnvelope@1, SignedPackEnvelope@1), Golden-Beispiele + Validierungstests |
+| 1A Eval-Protokoll | ✓ gebaut — `eval/protocol/` (EVAL-PROTOCOL.md, protocol.json, hash.mjs, statistics.mjs) als Preregistration-als-Code |
+| 1A SignedPack-Trust | ✓ gebaut — Envelope-Schema + Import-Implementierung (TOFU-Pinning, Downgrade-Schutz, fail-closed; `test/signed-pack.test.mjs`, `test/skills.test.mjs`) |
+| 1A Varianz-Pilot / Dry-Run | in Arbeit (`eval/pilot/` — Harness + Dry-Run-Skripte); formale 1A-Abnahme offen |
+| 1B Aufgaben | ✓ 20 hermetische Code-Aufgaben committed (`eval/tasks/`, 5 Familien × je 4); Baseline-Zahlen Arm A+B offen |
+| Phase 2 Kontextmodus | ✓ gebaut (Wellen A+B) — `soul_run` (submit/cancel/resume/retry), durable State Machine, Migration v10+v12, Receipt-Vertrag r2-F09, Reaper, Chaos-Testmatrix (`test/run-lifecycle.test.mjs`, `test/runs.test.mjs`, `test/chaos.test.mjs`) |
+| Phase 2 Worker | NICHT gebaut — RunnerAdapter-Interface + `soul-worker`-Paket existieren nicht; der Server spawnt nie; Arm-C-Messung steht aus |
+| Phase 3 Skill-Registry | ✓ gebaut — Migration v11, Lifecycle-Leiter, Screening/Positiv-Grammatik, Pack-Import, Kapsel-Exposition ≤3 promoted, CLI `soul-mcp skill …` (KEIN neues Tool); Promotion-Zyklus mit echten Eval-Daten + D/E-Messung offen |
+| Recipe-Registry (Cognition C2a) | NICHT gebaut — wartet auf eigenes Gate |
+| Cognition-Strang | C0a in Episode@1 realisiert, C0b in `soul_run`-Instrumentierung realisiert; C1a+ NICHT gebaut |
+| Testsuite | 349 Tests grün (`node --test`, 24 Dateien, ohne das parallel entstehende `test/eval-pilot.test.mjs`) — Stand 2026-07-17; „107" war der r3-Freeze-Stand |
+| Messungen | KEINE der Arm-Messungen (A–E) ist gelaufen — alle Akzeptanzkriterien unten sind unverändert offen |
+| Ehrlicher Hinweis zur Reihenfolge | Phase-2/3-Maschinerie wurde vor der formalen 1A-Abnahme und vor 1B-Baseline gebaut (Verträge/Schemas lagen zuerst, Bündel-Gate lief); die Gate-Bedingungen „1B-Gate vor Phase-2-Code" aus dem Freeze sind damit zeitlich überholt worden. Die MESS-Gates selbst bleiben bindend: keine Freigabe/kein Beta-Bump ohne die Arm-Messungen nach Protokoll |
+
 ## Phase 0 — Abschlussstand (erledigt bis auf Gate)
 
 | Deliverable | Status |
 |---|---|
 | Forensik-Audit 3.1.0 | ✓ docs/AUDIT-3.1.0.md |
-| P1/P2-Härtung | ✓ 3.2.0 (c2d81e1; Suite aktuell 107) |
+| P1/P2-Härtung | ✓ 3.2.0 (c2d81e1; Suite am r3-Freeze-Stand: 107 — aktuelle Zahl siehe Baustand oben) |
 | Client-Capability-Fakten | ✓ SOUL4-VISION §Betriebsarten |
 | Restore-Probe reale DB | ✓ docs/RESTORE-PROBE.md (16/16) |
 | API-Matrix + Kompat-Verträge | ✓ docs/API-MATRIX.md |
@@ -79,7 +97,7 @@ Baseline-Zahlen Arm A + B, mit CIs, committed als eval/results/baseline-v1.json.
 inkl. Varianz. **Gate:** Sol-Review des Protokolls + der Baseline, bevor
 Phase 2 Code beginnt.
 
-## Phase 2 — Runtime-Durchstich
+## Phase 2 — Runtime-Durchstich *(Baustand: Kontextmodus gebaut, Worker NICHT gebaut, Messung offen — siehe Baustand-Tabelle)*
 
 **Deliverables:**
 - `soul_run` (das EINE neue Tool): nimmt TaskContract (oder kompiliert ihn aus
@@ -98,6 +116,12 @@ Phase 2 Code beginnt.
   definiertem Timeout (Default 7 Tage) als `expired_unconfirmed`. Die
   Invariante "jeder Run hat ein Receipt" gilt damit in BEIDEN Modi synchron
   ab Run-Erzeugung — nur der Abschlussweg unterscheidet sich.
+  *(Baustand-Präzisierung per Bündel-Gate F02: die Hochstufung auf
+  `deterministic_verified` ist in 4.0 NICHT implementiert — sie erfordert
+  ein validiertes VerifierResult@1, das 4.0 nicht produziert. Im Kontextmodus
+  bleibt jedes Receipt `self_attested`; `evidence_ref` wird als auditierbarer
+  Verweis geführt, ändert die Klasse aber nicht. Getestet in
+  `test/runs.test.mjs`.)*
 - ReceiptV1 wird bei jedem Run geschrieben, auch bei Abbruch.
 **Akzeptanz (verschärft per F09/F05/F02):**
 - Alle v3-Tools unverändert grün (Golden Transcripts).
@@ -114,7 +138,7 @@ Phase 2 Code beginnt.
 - Receipts tragen Ehrlichkeitsklasse (self_attested / deterministic_verified
   / model_graded).
 
-## Phase 3 — Declarative Skill-Registry
+## Phase 3 — Declarative Skill-Registry *(Baustand: Registry-Maschinerie gebaut, Promotion-Zyklus mit echten Eval-Daten + D/E-Messung offen — siehe Baustand-Tabelle)*
 
 **Deliverables:**
 - `skills`-Tabelle + SkillManifest@1-Registry; Lifecycle Shadow → Canary →

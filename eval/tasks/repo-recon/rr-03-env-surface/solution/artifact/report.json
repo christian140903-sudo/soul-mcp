@@ -1,0 +1,8 @@
+{
+  "env_keys": [
+    { "name": "PORT", "required": false, "default": "3000" },
+    { "name": "LOG_LEVEL", "required": false, "default": "info" },
+    { "name": "DATA_DIR", "required": true, "default": null },
+    { "name": "CACHE_TTL_S", "required": false, "default": "60" }
+  ]
+}

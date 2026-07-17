@@ -29,6 +29,15 @@ import { getStats, getSessionCount } from './kernel/stats.js';
 import { exportAll, importAll } from './kernel/transfer.js';
 import { constitutionPath, loadConstitution } from './kernel/policy.js';
 import { appendEvent } from './kernel/ledger.js';
+import {
+  registerSkill,
+  transitionSkill,
+  listSkills,
+  importPack,
+  pinTrustedKey,
+  keyIdOf,
+  type SkillLifecycle,
+} from './kernel/skills.js';
 
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -50,6 +59,7 @@ export async function runCli(args: string[]): Promise<void> {
       case 'export': exportCmd(args[1]); break;
       case 'import': importCmd(args[1]); break;
       case 'semantic': await semanticCmd(args.slice(1)); break;
+      case 'skill': skillCmd(args.slice(1)); break;
       case 'config': printConfig(); break;
       case 'help': case '--help': case '-h': help(); break;
       case '--version': case '-v': console.log(SOUL_VERSION); break;
@@ -296,6 +306,112 @@ async function backfillCmd(): Promise<void> {
   );
 }
 
+/**
+ * Skill-Registry management (Soul 4.0 Phase 3). Deliberately CLI-only:
+ * register/promote/import are Ring-2 user actions — the 22+1 MCP tool
+ * contract stays untouched, models cannot manage the registry.
+ */
+function skillCmd(args: string[]): void {
+  const sub = args[0] || 'list';
+  getDb();
+
+  const readJson = (file?: string): unknown => {
+    if (!file || !existsSync(file)) throw new Error(`file not found: ${file ?? '(missing argument)'}`);
+    return JSON.parse(readFileSync(file, 'utf-8'));
+  };
+  const flagValues = (name: string): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === `--${name}` && args[i + 1] !== undefined) out.push(args[i + 1]!);
+    }
+    return out;
+  };
+  const positional = args.slice(1).filter((a, i, arr) => !a.startsWith('--') && arr[i - 1]?.startsWith('--') !== true);
+
+  if (sub === 'list') {
+    const skills = listSkills();
+    if (skills.length === 0) {
+      console.log(`${DIM}  No skills registered. Register one: ${CYAN}soul-mcp skill register <manifest.json>${RESET}`);
+      return;
+    }
+    console.log('');
+    for (const s of skills) {
+      const badge = s.lifecycle === 'promoted' ? GREEN : s.lifecycle === 'revoked' ? RED : AMBER;
+      console.log(`  ${badge}${s.lifecycle.padEnd(10)}${RESET} ${BOLD}${s.name}${RESET}@${s.version} ${DIM}(${s.source}${s.publisher_key_id ? `, ${s.publisher_key_id.slice(0, 20)}…` : ''})${RESET}`);
+      console.log(`  ${''.padEnd(11)}${DIM}${s.description.slice(0, 100)}${RESET}`);
+    }
+    console.log('');
+  } else if (sub === 'register') {
+    const r = registerSkill(readJson(positional[0]), { source: 'local', actor: 'user' });
+    if (r.ok) {
+      console.log(`${GREEN}  ✓${RESET} Registered ${BOLD}${r.name}@${r.version}${RESET} in lifecycle ${AMBER}shadow${RESET} ${DIM}(every skill starts here — promote via canary + evidence)${RESET}`);
+    } else {
+      console.log(`${RED}  ✗${RESET} Refused: ${r.reason}${r.detail ? ` — ${r.detail}` : ''}`);
+      process.exitCode = 1;
+    }
+  } else if (sub === 'transition' || sub === 'promote' || sub === 'revoke') {
+    const name = positional[0];
+    const to: SkillLifecycle | undefined =
+      sub === 'promote' ? 'promoted' : sub === 'revoke' ? 'revoked' : (positional[1] as SkillLifecycle | undefined);
+    const version = flagValues('version')[0];
+    if (!name || !to) {
+      console.log(`  Usage: soul-mcp skill transition <name> <to> [--version X] [--evidence <ref>] [--reason <text>]`);
+      process.exitCode = 1;
+      return;
+    }
+    const evidence = flagValues('evidence');
+    const r = transitionSkill(name, to, {
+      version,
+      ...(evidence.length > 0 ? { evidence: { eval_refs: evidence } } : {}),
+      reason: flagValues('reason')[0],
+      actor: 'user',
+    });
+    if (r.ok) {
+      console.log(`${GREEN}  ✓${RESET} ${r.name}@${r.version}: ${r.from} → ${BOLD}${r.to}${RESET}`);
+      if (r.cancelled_runs.length > 0) console.log(`    ${AMBER}rollback cancelled ${r.cancelled_runs.length} open run(s): ${r.cancelled_runs.join(', ')}${RESET}`);
+    } else {
+      console.log(`${RED}  ✗${RESET} Refused: ${r.reason}${r.detail ? ` — ${r.detail}` : ''}`);
+      process.exitCode = 1;
+    }
+  } else if (sub === 'import') {
+    const r = importPack(readJson(positional[0]), { actor: 'user' });
+    if (r.ok) {
+      console.log(`${GREEN}  ✓${RESET} Imported pack ${BOLD}${r.pack_name}@${r.pack_version}${RESET} from ${DIM}${r.key_id}${RESET}`);
+      for (const s of r.skills_registered) console.log(`    ${AMBER}shadow${RESET} ${s.name}@${s.version} ${DIM}(pack skills always start in shadow)${RESET}`);
+      if (r.sections_skipped.length > 0) console.log(`    ${DIM}skipped unknown optional sections: ${r.sections_skipped.join(', ')}${RESET}`);
+    } else {
+      console.log(`${RED}  ✗${RESET} Refused (fail-closed): ${r.reason}${r.detail ? ` — ${r.detail}` : ''}`);
+      process.exitCode = 1;
+    }
+  } else if (sub === 'pin') {
+    // Explicit TOFU pinning — running this command IS the user confirmation
+    // (Ring 2). Verify the fingerprint out-of-band before pinning.
+    const doc = readJson(positional[0]) as { envelope?: { publisher?: { key_id?: string; pubkey?: string } } };
+    const pub = doc?.envelope?.publisher;
+    if (!pub?.key_id || !pub?.pubkey) {
+      console.log(`${RED}  ✗${RESET} No publisher key found in the pack file.`);
+      process.exitCode = 1;
+      return;
+    }
+    const fingerprint = keyIdOf(pub.pubkey);
+    console.log(`  Publisher fingerprint: ${BOLD}${fingerprint}${RESET}`);
+    console.log(`  ${DIM}Compare this out-of-band with the publisher before trusting imports (SIGNED-PACK-TRUST §1).${RESET}`);
+    const r = pinTrustedKey({ keyId: pub.key_id, pubkey: pub.pubkey, label: flagValues('label')[0], actor: 'user' });
+    if (r.ok) {
+      console.log(r.already_pinned
+        ? `${GREEN}  ✓${RESET} Key was already pinned.`
+        : `${GREEN}  ✓${RESET} Key pinned (TOFU). Imports signed by this key are now accepted.`);
+    } else {
+      console.log(`${RED}  ✗${RESET} Refused: ${r.reason}${r.detail ? ` — ${r.detail}` : ''}`);
+      process.exitCode = 1;
+    }
+  } else {
+    console.log(`  Unknown skill subcommand: ${sub}`);
+    console.log(`  ${DIM}soul-mcp skill list | register <manifest.json> | transition <name> <to> [--version X] [--evidence <ref>]… | promote <name> --evidence <ref> | revoke <name> | import <pack.json> | pin <pack.json> [--label <text>]${RESET}`);
+    process.exitCode = 1;
+  }
+}
+
 function printConfig(): void {
   console.log(`  ${BOLD}Add Soul to your AI client${RESET}`);
   console.log('');
@@ -323,6 +439,11 @@ function help(): void {
   console.log(`    ${CYAN}soul-mcp import <file>${RESET}       Import a soul-passport (idempotent)`);
   console.log(`    ${CYAN}soul-mcp semantic on${RESET}         Enable local semantic retrieval (opt-in download)`);
   console.log(`    ${CYAN}soul-mcp semantic backfill${RESET}   Embed memories that are missing a vector`);
+  console.log(`    ${CYAN}soul-mcp skill list${RESET}          Skill registry (lifecycle, source, publisher)`);
+  console.log(`    ${CYAN}soul-mcp skill register <f>${RESET}  Register a SkillManifest@1 (starts in shadow)`);
+  console.log(`    ${CYAN}soul-mcp skill transition${RESET}    Lifecycle moves; promote needs --evidence <ref>`);
+  console.log(`    ${CYAN}soul-mcp skill import <pack>${RESET} Import a signed skill pack (fail-closed)`);
+  console.log(`    ${CYAN}soul-mcp skill pin <pack>${RESET}    Pin a publisher key (explicit TOFU trust)`);
   console.log(`    ${CYAN}soul-mcp config${RESET}              Show client configuration snippets`);
   console.log('');
   console.log(`  ${DIM}Data: ~/.soul/memories.db · Policy: ~/.soul/constitution.json (enforced in code)${RESET}`);

@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextool.app/soul/contracts/SkillManifest@1.schema.json",
+  "title": "SkillManifest@1",
+  "description": "Declarative-only (THREAT-MODEL TB5.1): ein Skill ist Daten, nie Code. Positiv-Grammatik statt Deny-Heuristik (DECISIONS F07): erlaubte Blöcke sind AUSSCHLIESSLICH steps, rubric, verifier_hints, context_recipe, io_schema, references — mit Längenlimits pro Feld; 'alles außerhalb der Grammatik ist invalid, nicht verdächtig'. Invariante (THREAT-MODEL §5.5): 'Skills sind untrusted data und können Tool-/Netz-/Dateirechte nie erweitern' (Monotonie-Gesetz F06/TB9) — deshalb existiert in diesem Schema strukturell KEIN Grant-/Capability-/Authority-Feld. URLs/Pfade nur in deklarierten Referenzfeldern, die NIE automatisch geladen werden. Ein Skill kann seine eigene Promotion nicht beeinflussen: Promotion-Logik liest Receipts/Evals, nie Skill-Text (TB5.5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "name", "version", "description", "lifecycle", "origin", "compatibility", "body"],
+  "properties": {
+    "contract": { "const": "SkillManifest@1" },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "version": {
+      "$ref": "#/$defs/semver",
+      "description": "Skill-SemVer; Dependencies/Konfliktauflösung/SemVer-Regeln werden in Phase 3 spezifiziert (DECISIONS F10)."
+    },
+    "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "lifecycle": {
+      "enum": ["shadow", "canary", "promoted", "deprecated", "revoked"],
+      "description": "Lifecycle Shadow→Canary→Promoted→Deprecated→Revoked (SOUL4-PLAN Phase 3). Importierte Skills starten IMMER als shadow — nie direkt promoted (TB5.4). Shadow-Skills werden ausschließlich in isolierten Eval-/Canary-Runs exponiert, nie in normalen Kapseln (TB5.3/F07)."
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["local", "imported", "pack"] },
+        "pack_signature": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Signatur gemäß SignedPackEnvelope (Spez 1A, Implementierung Phase 3 VOR erster Fremd-Pack-Annahme, F10)."
+        },
+        "imported_at": { "$ref": "#/$defs/isoDateTime" }
+      },
+      "description": "Herkunft am Skill sichtbar: local / imported / pack+Signatur ab Phase 3+ (TB5.4)."
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models"],
+      "properties": {
+        "models": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
+        "os": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 50 } },
+        "required_tools": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } },
+        "min_context_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Compatibility Vector (Modell, OS, Tools, Kontextbudget — SOUL4-PLAN Phase 3). required_tools ist eine ANFORDERUNGS-Deklaration an die Umgebung, nie ein Grant (Monotonie-Gesetz)."
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Environment-Fingerprint je Messung (SOUL4-PLAN Phase 3)."
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version_range"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+          "version_range": { "type": "string", "maxLength": 50 }
+        }
+      },
+      "description": "Platzhalter — Skill-Dependencies + Konfliktauflösung werden erst in Phase 3 spezifiziert (F10); bis dahin leer lassen."
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "instruction"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "instruction": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            }
+          }
+        },
+        "rubric": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 500 } },
+        "verifier_hints": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 500 } },
+        "context_recipe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memory_types": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 50 } },
+            "token_budget": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "io_schema": {
+          "type": "object",
+          "description": "JSON-Schema der erwarteten Artefakte — Grundlage der deterministischen Teilverifikation der Fähigkeitsleiter (DECISIONS F04)."
+        },
+        "references": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "target"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "target": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "note": { "type": "string", "maxLength": 300 }
+            }
+          },
+          "description": "Deklarierte Referenzfelder — werden NIE automatisch geladen (F07/TB5.2). Ein Zugriff erfolgt nur innerhalb des AuthorityEnvelope-Scopes des jeweiligen Runs."
+        }
+      },
+      "description": "Die Positiv-Grammatik (F07). Jeder Block außerhalb von steps/rubric/verifier_hints/context_recipe/io_schema/references macht das Manifest invalid."
+    },
+    "created_at": { "$ref": "#/$defs/isoDateTime" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "semver": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "isoDateTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" }
+  },
+  "examples": [
+    {
+      "contract": "SkillManifest@1",
+      "name": "minimal-fix-with-regression-test",
+      "version": "1.0.0",
+      "description": "Stufe 3 der Code-Fähigkeitsleiter (F04): minimaler Fix plus Regression-Test, der vorher rot war.",
+      "lifecycle": "shadow",
+      "origin": { "type": "local" },
+      "compatibility": {
+        "models": ["claude-*"],
+        "os": ["darwin", "linux"],
+        "required_tools": ["bash:npm-test"],
+        "min_context_tokens": 30000
+      },
+      "body": {
+        "steps": [
+          { "id": "s1", "instruction": "Reproduziere den roten Test lokal; halte die exakte Fehlermeldung fest." },
+          { "id": "s2", "instruction": "Schreibe zuerst den Regression-Test, der das Fehlverhalten nachweist (muss rot sein)." },
+          { "id": "s3", "instruction": "Implementiere den minimalen Fix; keine Drive-by-Refactorings." },
+          { "id": "s4", "instruction": "Führe die volle Suite aus; alle Tests müssen grün sein." }
+        ],
+        "rubric": [
+          "Regression-Test war vor dem Fix nachweislich rot",
+          "Diff enthält keine Änderungen außerhalb des Fehlerpfads"
+        ],
+        "verifier_hints": ["node --test Exit-Code", "git diff --stat gegen Scope prüfen"],
+        "context_recipe": { "memory_types": ["error", "solution"], "token_budget": 2000 },
+        "io_schema": { "type": "object", "required": ["fixed_files", "regression_test"] },
+        "references": [
+          { "label": "Testkonventionen", "target": "docs/API-MATRIX.md", "note": "wird nie automatisch geladen" }
+        ]
+      },
+      "created_at": "2026-07-16T12:00:00Z"
+    }
+  ]
+}

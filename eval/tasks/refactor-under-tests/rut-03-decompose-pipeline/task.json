@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rut-03-decompose-pipeline",
+  "cluster": "refactor-under-tests",
+  "skill_stage": 5,
+  "title": "Monolithische Verarbeitungsfunktion unter grünen Tests zerlegen",
+  "description": "lib/records.mjs enthält processRecord(line), das Parsen, Validieren und Formatieren in EINER Funktion vermischt. Die Testsuite (nur für processRecord) ist grün und bleibt UNANGETASTET (der Verifier lehnt jede Test-Änderung ab). Auftrag: Zerlege die Pipeline, OHNE das Verhalten zu ändern: exportiere ZUSÄTZLICH parseRecord(line) -> record, validateRecord(record) -> record (wirft bei ungültigem Record, gleiche Fehlermeldungen wie bisher) und formatRecord(record) -> string, sodass formatRecord(validateRecord(parseRecord(line))) für jede Eingabe EXAKT dasselbe Ergebnis (Rückgabe UND Fehlermeldung) liefert wie processRecord(line). processRecord bleibt exportiert. Der Verifier prüft mechanisch: Tests grün, die drei neuen Exports existieren, Kompositions-Eigenschaft auf validen und invaliden Eingaben. Nur lib/records.mjs ändern, keine neuen Dateien.",
+  "task_slice": { "kind": "code_fix", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "lib/records.mjs", "kind": "source", "description": "zerlegte Pipeline mit parseRecord/validateRecord/formatRecord + processRecord" }
+  ],
+  "budget_hint": { "max_tokens": 20000, "max_wall_clock_s": 300, "max_cost_eur": 1, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

@@ -1,0 +1,15 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "rr-01-module-graph",
+  "cluster": "repo-recon",
+  "skill_stage": 1,
+  "title": "Modul-Graph eines kleinen ESM-Projekts erfassen",
+  "description": "Erfasse die Struktur des Projekts im Arbeitsverzeichnis (Einstiegspunkt: src/index.mjs) und schreibe artifact/report.json mit EXAKT diesen Feldern: (1) files: alle .mjs-Dateien als repo-relative Pfade mit Forward-Slashes; (2) exports: Objekt Pfad -> Liste der exportierten Namen; (3) imports: Objekt Pfad -> Liste der repo-relativen Pfade, die diese Datei per import lädt (jede .mjs-Datei kommt als Key vor, ggf. mit leerer Liste); (4) orphans: Liste der Dateien, die von keiner anderen Datei importiert werden und nicht der Einstiegspunkt sind. Listen-Reihenfolge ist egal (der Verifier sortiert), Pfade müssen exakt stimmen.",
+  "task_slice": { "kind": "research", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "artifact/report.json", "kind": "json", "description": "Struktur-Report mit files/exports/imports/orphans" }
+  ],
+  "budget_hint": { "max_tokens": 8000, "max_wall_clock_s": 120, "max_cost_eur": 0.5, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

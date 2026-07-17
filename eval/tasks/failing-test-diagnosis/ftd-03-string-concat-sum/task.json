@@ -1,0 +1,16 @@
+{
+  "task_schema": "EvalTask@1",
+  "task_id": "ftd-03-string-concat-sum",
+  "cluster": "failing-test-diagnosis",
+  "skill_stage": 2,
+  "title": "Typ-Koerzion in einer Summierungsfunktion diagnostizieren (ohne Fix)",
+  "description": "Im Arbeitsverzeichnis schlägt die Testsuite fehl (node --test test/). Die Beträge kommen als Strings aus einem CSV-Import. Diagnostiziere den Defekt, OHNE Code zu ändern (der Verifier lehnt jede Änderung an lib/ ab). Schreibe artifact/diagnosis.json mit EXAKT diesen Feldern: defect_file, defect_function, category (genau eine aus category_options), trigger: {args, observed, expected, actual}. observed = \"return\". expected = der korrekte Rückgabewert; actual = der tatsächliche (fehlerhafte) Rückgabewert. Der Verifier führt deinen Trigger wirklich aus: actual muss dem realen Verhalten entsprechen, expected dem korrekten, und beide müssen sich unterscheiden.",
+  "category_options": ["off_by_one", "input_mutation", "type_coercion", "wrong_comparator", "missing_await", "logic_inversion"],
+  "task_slice": { "kind": "code_review", "risk": "low" },
+  "expected_artifacts": [
+    { "path": "artifact/diagnosis.json", "kind": "json", "description": "Belegte Defekt-Diagnose mit ausführbarem Trigger" }
+  ],
+  "budget_hint": { "max_tokens": 12000, "max_wall_clock_s": 180, "max_cost_eur": 0.5, "max_attempts": 1 },
+  "verifier": { "entry": "verifier.mjs", "invocation": "node verifier.mjs <workdir>", "pass_exit_code": 0 },
+  "hermetic": { "network": false, "clock_dependency": false, "machine_dependency": false }
+}

@@ -36,6 +36,7 @@ import { loadConstitution } from './kernel/policy.js';
 import { computeAssignments, resolveAssignment, openAssignmentViews } from './kernel/workbench.js';
 import { makePrediction, listPredictions, getCalibration, deliberate, commitDeliberation, type DeliberationKind } from './kernel/cognition.js';
 import { relatedMemories } from './kernel/semantic.js';
+import { startContextRun, closeRunWithFeedback, cancelRun, resumeRun, retryRun, reapExpired, type FeedbackOutcome } from './kernel/runs.js';
 import { SOUL_VERSION } from './kernel/db.js';
 
 const MEMORY_TYPES = ['episodic', 'semantic', 'procedural', 'preference', 'relationship', 'goal', 'identity', 'working'] as const;
@@ -67,6 +68,15 @@ export function createSoulServer(): McpServer {
         '5. At session end (or when the user says goodbye), call soul_reflect with 2-3 sentences and real learnings.',
     }
   );
+
+  // Reaper at server start (F09r2): a lazy sweep, never a background timer —
+  // an MCP stdio server has no safe background lifecycle. Failures here must
+  // never prevent the server from starting.
+  try {
+    reapExpired();
+  } catch (err) {
+    console.error('[soul] reaper sweep at startup failed:', err);
+  }
 
   // ─── Tools ──────────────────────────────────────────────────────────
 
@@ -320,23 +330,161 @@ export function createSoulServer(): McpServer {
   );
 
   server.registerTool(
+    'soul_run',
+    {
+      title: 'Run (context mode)',
+      description:
+        'Compile a free-text task into a TaskContract@1 and open a durable run in CONTEXT mode: the server ' +
+        'never spawns anything — YOU execute the task in this conversation. Run, a pending receipt ' +
+        '(self_attested) and a PENDING episode are created synchronously in one transaction; the capsule ' +
+        'tells you how to close them. Same idempotency_key returns the same run (no duplicate). ' +
+        'When done, call soul_feedback({run_id, outcome: success|failure|mixed}); pass evidence_ref ' +
+        '(e.g. a test command + exit code) as an auditable reference carried in the receipt — it does ' +
+        'NOT change the honesty_class (stays self_attested; deterministic_verified requires a validated ' +
+        'VerifierResult@1, which 4.0 does not produce). Without ' +
+        'feedback the reaper closes the receipt after SOUL_RECEIPT_TTL_DAYS (default 7) as ' +
+        'expired_unconfirmed — missingness, not a verdict. ' +
+        'Lifecycle actions (all take run_id): action "cancel" cancels a queued/running run and closes ' +
+        'its pending receipt as cancelled (the episode stays PENDING — no outcome was ever observed); ' +
+        '"resume" idempotently re-delivers the capsule of a running run with a valid lease; ' +
+        '"retry" starts a NEW attempt on a failed/cancelled/expired run (new fencing token, new pending ' +
+        'receipt, new episode) and respects budget.max_attempts. Default action is "submit".',
+      inputSchema: z.object({
+        task: z.string().min(1).optional().describe('The task in free text — required for action "submit" (the default). Compiled deterministically into a TaskContract@1 (source: freitext_compiled).'),
+        idempotency_key: z.string().min(1).max(128).optional().describe('Same key -> same run returned, never a duplicate. Generated if omitted. Submit only.'),
+        budget: z
+          .object({
+            max_tokens: z.number().int().min(1).optional(),
+            max_wall_clock_s: z.number().int().min(1).optional(),
+            max_cost_eur: z.number().min(0).optional(),
+            max_attempts: z.number().int().min(1).optional(),
+          })
+          .optional()
+          .describe('Budget overrides; sensible context-mode defaults otherwise. No run without a budget. Submit only.'),
+        risk: z.enum(['low', 'high']).optional().describe('high = irreversible / externally visible. Recorded in the episode task slice. Default low. Submit only.'),
+        action: z
+          .enum(['submit', 'cancel', 'resume', 'retry'])
+          .optional()
+          .describe('Lifecycle action. Default "submit" (open a new run from task). cancel/resume/retry require run_id.'),
+        run_id: z.string().optional().describe('The run to cancel/resume/retry. Required for those actions, ignored for submit.'),
+      }),
+    },
+    async ({ task, idempotency_key, budget, risk, action, run_id }) => {
+      reapExpired(); // lazy sweep — the reaper runs on every run/feedback call
+      const act = action ?? 'submit';
+
+      if (act !== 'submit') {
+        if (!run_id) {
+          return { ...jsonResult({ error: `run_id is required for action "${act}".` }), isError: true };
+        }
+        if (act === 'cancel') {
+          const r = cancelRun(run_id);
+          if (!r.cancelled) return { ...jsonResult(r), isError: true };
+          return jsonResult({
+            ...r,
+            mode: 'context',
+            hinweis:
+              'Run cancelled: the pending receipt closed as cancelled; the episode stays PENDING ' +
+              '(no outcome was ever observed — missingness, not a verdict). Use action "retry" for a new attempt.',
+          });
+        }
+        if (act === 'resume') {
+          const r = resumeRun(run_id);
+          if (!r.resumed) return { ...jsonResult(r), isError: true };
+          return jsonResult({
+            ...r,
+            mode: 'context',
+            existing: true,
+            hinweis:
+              `Same run, same receipt — nothing new was created. Execute the task in this context, then close it: ` +
+              `soul_feedback({run_id: "${r.run_id}", outcome: "success"|"failure"|"mixed"}).`,
+          });
+        }
+        // act === 'retry'
+        const r = retryRun(run_id);
+        if (!r.retried) return { ...jsonResult(r), isError: true };
+        return jsonResult({
+          ...r,
+          mode: 'context',
+          existing: false,
+          hinweis:
+            `New attempt ${r.attempt} on the same run (new fencing token, new pending receipt, new episode). ` +
+            `Execute the task now, then close it: soul_feedback({run_id: "${r.run_id}", outcome: "success"|"failure"|"mixed"}).`,
+        });
+      }
+
+      if (!task) {
+        return { ...jsonResult({ error: 'task is required for action "submit".' }), isError: true };
+      }
+      const result = startContextRun({ task, idempotencyKey: idempotency_key, budget, risk });
+      return jsonResult({
+        run_id: result.run_id,
+        status: result.status,
+        mode: 'context',
+        existing: result.existing,
+        task_contract: result.task_contract,
+        receipt_id: result.receipt_id,
+        episode_id: result.episode_id,
+        hinweis:
+          `Execute the task now, in this context. Then close the run: soul_feedback({run_id: "${result.run_id}", ` +
+          'outcome: "success"|"failure"|"mixed"}). Add evidence_ref with a verifiable reference (test run, ' +
+          'exit code, diff) — it is carried in the receipt as an auditable reference; the receipt stays ' +
+          'self_attested (deterministic_verified requires a validated VerifierResult@1, not built in 4.0). ' +
+          'Unclosed runs expire as expired_unconfirmed.',
+      });
+    }
+  );
+
+  server.registerTool(
     'soul_feedback',
     {
       title: 'Capsule Feedback',
       description:
         'Close the retrieval feedback loop: report which memories from a context capsule you actually ' +
         'used and which were unhelpful. Unmentioned memories stay unknown — they are NOT marked ' +
-        'unhelpful. Feeds ranking (usage weight) and the retrieval measurement base.',
+        'unhelpful. Feeds ranking (usage weight) and the retrieval measurement base. ' +
+        'Additionally closes a soul_run when run_id is set: outcome (success|failure|mixed) closes the ' +
+        'pending receipt and back-fills the episode outcome bitemporally; evidence_ref is carried in the ' +
+        'receipt as an auditable reference and does NOT change the honesty_class — the receipt stays ' +
+        'self_attested (deterministic_verified requires a validated VerifierResult@1, which 4.0 does not ' +
+        'produce).',
       inputSchema: z.object({
-        context_id: z.string().describe('The context_id from the soul_context capsule.'),
+        context_id: z.string().optional().describe('The context_id from the soul_context capsule.'),
         used_ids: z.array(z.string()).optional().describe('Memory ids that genuinely informed your work.'),
         unhelpful_ids: z.array(z.string()).optional().describe('Memory ids that were noise for this task.'),
+        run_id: z.string().optional().describe('A soul_run id to close with this feedback.'),
+        outcome: z.enum(['success', 'failure', 'mixed']).optional().describe('Run outcome — required when run_id is set.'),
+        evidence_ref: z.string().optional().describe('Verifiable evidence reference (test command + exit code, diff, artifact path). Carried in the receipt as an auditable reference; does NOT change the honesty_class (stays self_attested).'),
+        summary: z.string().optional().describe('Short outcome summary for the receipt.'),
       }),
     },
-    async ({ context_id, used_ids, unhelpful_ids }) => {
+    async ({ context_id, used_ids, unhelpful_ids, run_id, outcome, evidence_ref, summary }) => {
+      if (run_id) reapExpired(); // lazy sweep on the run-closing path
+      if (!context_id && !run_id) {
+        return { ...jsonResult({ error: 'Provide context_id (capsule feedback) and/or run_id (run closure).' }), isError: true };
+      }
+      // Run closure path (additive — calls without run_id behave exactly as before).
+      let runResult = null;
+      if (run_id) {
+        if (!outcome) {
+          return { ...jsonResult({ error: 'outcome (success|failure|mixed) is required when run_id is set.' }), isError: true };
+        }
+        runResult = closeRunWithFeedback({ runId: run_id, outcome: outcome as FeedbackOutcome, evidenceRef: evidence_ref, summary });
+      }
+      if (!context_id) {
+        return jsonResult({
+          run: runResult,
+          message: runResult?.closed
+            ? `Run ${run_id} closed: receipt ${runResult.receipt_status} (${runResult.honesty_class}), episode outcome ${runResult.episode_outcome}.`
+            : runResult?.already_closed
+              ? `Run ${run_id}: receipt was already closed (${runResult.receipt_status}).`
+              : runResult?.error ?? 'No feedback applied.',
+        });
+      }
       const result = applyMemoryFeedback(context_id, used_ids ?? [], unhelpful_ids ?? []);
       return jsonResult({
         ...result,
+        ...(runResult ? { run: runResult } : {}),
         message:
           `Feedback recorded (${result.used} used, ${result.unhelpful} unhelpful` +
           (result.ignored > 0

@@ -4,8 +4,9 @@
 > R7/R8 ergänzt; TB5/TB7-Mechanik verschärft; Import-DoS in TB3. Die
 > vollständigen Begründungen stehen in docs/SOUL4-DECISIONS.md (F01–F10).
 
-> Geltungsbereich: soul-mcp 3.2.0 + die für 4.0 geplanten Erweiterungen
-> (declarative Skills, soul_run, RunnerAdapter, Eval-Harness, Receipts).
+> Geltungsbereich: soul-mcp 3.2.0 + die für 4.0 geplanten bzw. inzwischen
+> gebauten Erweiterungen (declarative Skills ✓, soul_run ✓ Kontextmodus,
+> Receipts ✓, Eval-Harness ✓; RunnerAdapter weiterhin nicht gebaut).
 > Out of scope: ein kompromittiertes Betriebssystem / Benutzerkonto — wer
 > `~/.soul` lesen kann, hat gewonnen; Soul verschlüsselt nicht at rest.
 > Das ist eine bewusste Local-first-Entscheidung, kein Versehen.
@@ -117,6 +118,11 @@ Prozesse, Disk, Output-Bytes, EUR); strukturierte Ausgabe gegen Schema
 validiert. Worker ist ein SEPARATES Paket — der MCP-Server spawnt nie.
 Receipts schreibt der Coordinator/Reaper, nie der Worker selbst (F09), mit
 Ehrlichkeitsklasse self_attested / deterministic_verified / model_graded.
+Der Receipt-Vertrag gilt auch im kontext-getriebenen Modus OHNE Worker
+(r2-F09): synchrones `pending`/`self_attested`-Receipt bei Run-Erzeugung,
+Abschluss durch `soul_feedback` (ggf. Hochstufung) oder durch den Reaper
+nach Timeout (Default 7 Tage) als `expired_unconfirmed` — kein Run ohne
+Receipt, in keinem Modus.
 
 ### TB6b (4.0): Worker-Arbeitsdaten ↔ Modellprovider (DECISIONS F05)
 **Risiko:** Nicht der Worker-Prozess, sondern die DATEN sind das Leck —
@@ -192,8 +198,10 @@ TB9 bewacht, was Soul TUT.
 6. Wer erzeugt, bewertet nicht; wer bewertet, promotet nicht allein.
 7. Held-out ist technisch unerreichbar für Optimierer (Two-Key + Taint),
    nicht bloß verboten.
-8. Jeder Runner-Lauf hat Budget + Receipt — auch der abgestürzte; Receipts
-   schreibt der Reaper, nie der Worker.
+8. Jeder Run hat Budget + Receipt — auch der abgestürzte und auch der
+   kontext-getriebene ohne Worker (synchron pending/self_attested,
+   Abschluss via soul_feedback oder Reaper als expired_unconfirmed);
+   Receipts schreibt der Reaper/Coordinator, nie der Worker.
 9. Ausführungsrechte nur per Grant (AuthorityEnvelope-Monotonie); Freitext,
    Skills und Modelloutput erweitern nie Rechte.
 10. Export-Defaults: private Artefakte und lokale Evals verlassen die

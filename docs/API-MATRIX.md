@@ -1,15 +1,15 @@
 # Soul MCP — Versionierte API-Matrix
 
-- **Stand-Version:** 3.2.0 (`SOUL_VERSION`, `src/kernel/db.ts:19`)
-- **Datum:** 2026-07-16
+- **Stand-Version:** 3.2.0 (`SOUL_VERSION`, `src/kernel/db.ts:19` — bleibt bis zur Phase-2-Akzeptanz auf 3.2.0, PLAN §Betriebsregeln 4). **Baustand:** 4.0-dev — Phase 1A/1B, Phase 2 (Kontextmodus, ohne Worker) und Phase 3 (Skill-Registry) sind gebaut.
+- **Datum:** 2026-07-17
 - **Zweck:** Grundlage des Kompatibilitätsvertrags für Soul 4.0 (Sol-Gate **F03** öffentliche API, **F08** Kompatibilitätsvertrag / Golden Transcripts). Diese Matrix ist die kanonische Liste dessen, was 4.0 nicht brechen darf.
-- **Belegquelle:** Jede Zeile ist aus `src/server.ts` extrahiert (Extraktions-Commit 7c87b77). Klassifikation der 4.0-Wirkung nach `docs/SOUL4-VISION.md` §4 (Öffentliche API, Sol F03).
+- **Belegquelle:** Jede Zeile ist aus `src/server.ts` extrahiert (Erst-Extraktion Commit 7c87b77; 4.0-Zeilen nachgeführt auf Stand 976b452). Klassifikation der 4.0-Wirkung nach `docs/SOUL4-VISION.md` §4 (Öffentliche API, Sol F03).
 
-**Bestand:** 22 Tools · 8 statische Resources + 1 Template-Resource (= 9) · 3 Prompts.
+**Bestand:** 23 Tools (22 v3-Tools + `soul_run`, das einzige NEU-in-4.0-Tool per Vertrag) · 8 statische Resources + 1 Template-Resource (= 9) · 3 Prompts · CLI-Subcommand-Oberfläche (Tabelle C).
 
 ---
 
-## Tabelle A — Tools (22)
+## Tabelle A — Tools (23)
 
 Klassifikation der 4.0-Wirkung: **unverändert** · **additiv-erweitert** (Verhalten bleibt, Felder/Optionen kommen dazu) · **NEU in 4.0** · **deprecated-Kandidat** (echte Redundanz, nur benannt — nicht entschieden).
 
@@ -17,12 +17,12 @@ Klassifikation der 4.0-Wirkung: **unverändert** · **additiv-erweitert** (Verha
 |------|----------------|------|---------------|--------------------|
 | `soul_remember` | Speichert eine Erinnerung durch die Capture-Pipeline (Secret-Reject, Injection-Quarantäne, Dedup, Konflikt-Flag, Provenance-Guard). | v2 | memory (`capture`) | unverändert |
 | `soul_recall` | Sucht Erinnerungen mit Score-Breakdown und Provenance; disputed geflaggt, quarantined/deleted nie. | v2 | retrieval (`recall`) | unverändert |
-| `soul_context` | Kompiliert eine token-budgetierte Kontext-Kapsel (Identität, Ziele, relevante Memories, Konflikte) mit Ledger-Receipt. | v2 | context (`compileContext`) | unverändert (Kapsel-Interna sind 4.0-Compiler-Territorium, Tool-Vertrag bleibt) |
+| `soul_context` | Kompiliert eine token-budgetierte Kontext-Kapsel (Identität, Ziele, relevante Memories, Konflikte) mit Ledger-Receipt. | v2 | context (`compileContext`) | **additiv-erweitert (GEBAUT, Phase 3)** — optionale `skills`-Kapselsektion: ≤3 task-scoped Skills, ausschließlich Lifecycle `promoted` (shadow/canary nie exponiert), deterministisches Matching; ohne Match fehlt der Key und die Kapsel bleibt byte-identisch zum Pre-Skills-Vertrag (`src/kernel/context.ts`, `getSkillsForTask`; Golden Tests halten). |
 | `soul_workbench` | Liefert deterministisch berechnete Denk-Assignments (Denkpartner-Protokoll) mit exaktem Antwort-Schema. | v3.0 | workbench (`computeAssignments`) | unverändert |
 | `soul_resolve` | Beantwortet ein Workbench-Assignment unter Code-Guards (kein Hard-Delete, Supersession, `needs_user`). | v3.0 | workbench (`resolveAssignment`) | unverändert |
 | `soul_predict` | Registriert eine falsifizierbare Behauptung mit Wahrscheinlichkeit; fällige kehren via Workbench zurück, speisen Kalibrierung. | v3.0 | cognition (`makePrediction`) | unverändert |
 | `soul_commit_deliberation` | Schließt eine `soul_deliberate`-Deliberation mit Verdict, Konfidenz, Annahmen ab. | v3.0 | cognition (`commitDeliberation`) | unverändert |
-| `soul_feedback` | Schließt die Retrieval-Feedback-Schleife: welche Kapsel-Memories genutzt / unnütz waren. | v3.1 | memory (`applyMemoryFeedback`) | **additiv-erweitert** — Vision §4: soll zusätzlich Receipt-/Run-Feedback aus `soul_run` aufnehmen (Nutzungssignal je Skill/Rezept). Bestehende `context_id`-Semantik bleibt. |
+| `soul_feedback` | Schließt die Retrieval-Feedback-Schleife: welche Kapsel-Memories genutzt / unnütz waren. | v3.1 | memory (`applyMemoryFeedback`), runs (`closeRunWithFeedback`) | **additiv-erweitert (GEBAUT, Phase 2)** — neue optionale Parameter `run_id`, `outcome` (success/failure/mixed, Pflicht wenn `run_id` gesetzt), `evidence_ref`, `summary`; `context_id` ist jetzt optional (mindestens eines von `context_id`/`run_id` nötig). Mit `run_id` schließt es das pending Receipt und füllt das Episode-Outcome bitemporal nach; `evidence_ref` ist auditierbarer Verweis und ändert die `honesty_class` NICHT (bleibt `self_attested`). Calls ohne `run_id` verhalten sich exakt wie v3.1. |
 | `soul_deliberate` | Liefert ein strukturiertes Denk-Scaffold plus validierte User-Prozeduren und Kalibrierungs-Record. | v3.0 | cognition (`deliberate`) | unverändert |
 | `soul_confirm` | Bestätigt eine candidate/disputed Erinnerung als user-verifiziert (Konfidenz hoch, Status upgrade). | v2 | memory (`confirmMemory`) | unverändert |
 | `soul_correct` | Korrigiert eine Erinnerung per Supersession (alt bleibt superseded + verlinkt). | v2 | memory (`correctMemory`) | unverändert |
@@ -37,11 +37,12 @@ Klassifikation der 4.0-Wirkung: **unverändert** · **additiv-erweitert** (Verha
 | `soul_review_queue` | Memory-Inbox: Candidates, quarantined, disputed pairs zur Auflösung. | v3.0 | memory (`listMemories`/`listDisputedPairs`) | unverändert |
 | `soul_export` | Exportiert alles als checksummiertes soul-passport JSON (`restore(export(soul)) == soul`). | v2 | transfer (`exportAll`) | **additiv-erweitert** — Vision §3/§4: Passport soll zusätzlich portable Skills / Receipts / lokale Evals / private Artefakte tragen (additiv, siehe Schema-Verträge). |
 | `soul_import` | Importiert ein v2-Passport oder Legacy-v1; idempotent, Checksum-Mismatch verweigert, Live-Screening. | v2 | transfer (`importAll`/`importV1Export`) | **additiv-erweitert** — muss die additiven 4.0-Passport-Sektionen tolerant lesen; v2/v1-Pfade unverändert. |
+| `soul_run` | Kompiliert Freitext deterministisch in einen TaskContract@1 und öffnet einen durablen Run im **Kontextmodus** (der Server spawnt nie — das Host-Modell führt im Gespräch aus). | **4.0 (GEBAUT, Phase 2)** | runs (`startContextRun`/`cancelRun`/`resumeRun`/`retryRun`/`reapExpired`) | **NEU in 4.0** — das einzige neue Tool per Vertrag (Vision §4). Aktionen: `submit` (default) · `cancel` · `resume` · `retry` (letzte drei mit Pflicht-`run_id`). Zustände: queued/running/succeeded/failed/cancelled (+ expired via Reaper). **Kontextmodus-Receipt-Vertrag (r2-F09):** Run, pending Receipt (`self_attested`) und PENDING-Episode entstehen SYNCHRON in einer Transaktion; Abschluss via `soul_feedback({run_id, outcome})`; ohne Feedback schließt der Reaper nach `SOUL_RECEIPT_TTL_DAYS` (Default 7) als `expired_unconfirmed` — Missingness, kein Verdikt. `deterministic_verified` wird in 4.0 NICHT vergeben (bräuchte validiertes VerifierResult@1). **Idempotenz:** gleicher `idempotency_key` → derselbe Run, nie ein Duplikat. Retry = neuer Attempt mit neuem Fencing-Token/Receipt/Episode, respektiert `budget.max_attempts`; Cancel schließt das Receipt als cancelled und die Episode terminal als `cancelled_unobserved` (Missingness, kein Urteil — V27). |
 
 **Fußtext zu Tabelle A:**
-- `soul_run` (Vision §4, das **einzige** NEU-in-4.0-Tool) ist im v3.2-Code **noch nicht registriert** — daher nicht in der Tabelle. Es kommt erst in Phase 2. Hier festgehalten als einziger geplanter additiver Tool-Eintrag, damit die N/N-1-Matrix ihn erwartet.
+- `soul_run` ist seit Phase 2 (Kontextmodus, Wellen A+B) **registriert und getestet** (`test/run-lifecycle.test.mjs`, `test/runs.test.mjs`, `test/chaos.test.mjs`). Der Worker-Modus (RunnerAdapter, separates Paket `soul-worker`) ist weiterhin **NICHT gebaut** — der Server spawnt nie; `soul_run` liefert ausschließlich den Kontextmodus.
 - `soul_review` aus dem alten Ideen-Dump ist in v3.2 **nie existiert** und laut Vision §4 gestrichen (Workbench/Resolve/Review-Queue decken es ab). Kein Deprecation nötig — es gibt nichts zu deprecaten.
-- **Deprecated-Kandidaten (nur benannt, nicht entschieden):** Ich finde im Code **keine echte Redundanz** unter den 22 Tools. Grenzfall zur Prüfung: `soul_mark_useful` überschneidet sich funktional mit dem `unhelpful_ids`/`used_ids`-Pfad von `soul_feedback` (beide schreiben Usage-/Importance-Signal). `soul_feedback` ist kapsel-gebunden (`context_id`), `soul_mark_useful` ist ID-direkt — kein Duplikat, aber der einzige Kandidat, falls 4.0 das Feedback-Modell konsolidiert. Entscheidung offen.
+- **Deprecated-Kandidaten (nur benannt, nicht entschieden):** Ich finde im Code **keine echte Redundanz** unter den 22 v3-Tools. Grenzfall zur Prüfung: `soul_mark_useful` überschneidet sich funktional mit dem `unhelpful_ids`/`used_ids`-Pfad von `soul_feedback` (beide schreiben Usage-/Importance-Signal). `soul_feedback` ist kapsel-gebunden (`context_id`), `soul_mark_useful` ist ID-direkt — kein Duplikat, aber der einzige Kandidat, falls 4.0 das Feedback-Modell konsolidiert. Entscheidung offen.
 
 ---
 
@@ -70,6 +71,24 @@ Klassifikation der 4.0-Wirkung: **unverändert** · **additiv-erweitert** (Verha
 | `soul-session-end` | Vor Session-Ende reflektieren und konsolidieren (`soul_reflect`). | v2 | unverändert |
 
 **Fußtext zu Tabelle B:** Kein neuer Resource/Prompt in der Vision spezifiziert. `soul://run/{id}` (Run-State) wäre ein plausibler additiver Phase-2-Resource, ist aber nicht spezifiziert — daher hier nicht als geplant geführt.
+
+---
+
+## Tabelle C — CLI-Oberfläche (`soul-mcp <subcommand>`)
+
+Die CLI (`src/cli.ts`) ist **nicht** Teil des MCP-Tool-Vertrags (keine Wirkung auf die 23-Tool-Zählung), aber öffentliche Oberfläche. Bestand v3: `init` · `status` · `doctor` · `backup` · `restore` · `export` · `import` · `semantic` · `config`. **NEU in 4.0 (GEBAUT, Phase 3)** — analog zum bestehenden `semantic`-Subcommand-Muster:
+
+| Subcommand | Zweck (1 Satz) | Kernel-Modul |
+|------------|----------------|--------------|
+| `skill list` | Skill-Registry anzeigen (Lifecycle, Source, Publisher). | skills (`listSkills`) |
+| `skill register <manifest.json>` | Registriert ein SkillManifest@1 — startet IMMER in `shadow` (TB5.4), Screening fail-closed. | skills (`registerSkill`) |
+| `skill transition <name> <to> [--version X] [--evidence <ref>] [--reason <text>]` | Lifecycle-Übergänge (shadow→canary→promoted→deprecated→revoked); Promote nur mit `--evidence`. | skills (`transitionSkill`) |
+| `skill promote <name> --evidence <ref>` | Kurzform für transition auf `promoted`. | skills |
+| `skill revoke <name>` | Terminal revozieren (inkl. Rollback-Sweep offener Runs). | skills |
+| `skill import <pack.json>` | Signiertes Skill-Pack importieren — fail-closed (Signatur, Pin, Downgrade-Schutz); Pack-Skills starten in `shadow`. | skills (`importPack`) |
+| `skill pin <pack.json> [--label <text>]` | Publisher-Key explizit pinnen (TOFU ist eine bewusste User-Aktion, nie implizit beim Import). | skills (`pinTrustedKey`) |
+
+Skill-Registrierung/Lifecycle/Pack-Import laufen ausschließlich über die CLI — **kein neues MCP-Tool** dafür (Vertragstreue zu Vision §4: `soul_run` bleibt das einzige neue Tool).
 
 ---
 
@@ -103,11 +122,17 @@ Klassifikation der 4.0-Wirkung: **unverändert** · **additiv-erweitert** (Verha
 | V22 | Semantisch ähnliche Präferenzen ohne Wort-Overlap werden zu Dispute, nicht zu Merge. | README:85 | `test/workbench-semantic.test.mjs` |
 | V23 | Soft-Forget hält Tombstone, entfernt aber aus FTS-Index UND Vector-Store; Hard-Forget löscht die Zeile. | `soul_forget` desc; README:20 | `test/semantic.test.mjs:83` (soft-deleted nie recalled); `test/pipeline.test.mjs` (Tombstone vs Row) |
 | V24 | Deterministisches Retrieval-Tie-Breaking (gleiche Query → stabile Reihenfolge). | README:20 | `test/v311-fixes.test.mjs:178` (Score-Tie → importance desc, dann id asc) |
+| V25 | `soul_run` submit erzeugt Run + pending Receipt (`self_attested`) + PENDING-Episode **synchron in einer Transaktion**; gleicher `idempotency_key` → derselbe Run, nie ein Duplikat. | `soul_run` desc | `test/runs.test.mjs` (synchron + schema-valid; Idempotenz-Test); `test/run-lifecycle.test.mjs` (e2e golden guard: submit ohne action = Welle-A-Kapselform) |
+| V26 | Run-Abschluss nur über `soul_feedback({run_id, outcome})`; `evidence_ref` ändert die `honesty_class` NICHT (bleibt `self_attested`); ausbleibendes Feedback → Reaper schließt nach TTL als `expired_unconfirmed` (Missingness, kein Verdikt). | `soul_run`/`soul_feedback` desc | `test/runs.test.mjs` (bitemporaler Back-fill; evidence_ref-F02-Test; Reaper-TTL-Test); `test/chaos.test.mjs` (chaos d/e: Close überlebt SIGKILL, genau einmal) |
+| V27 | Lifecycle-Aktionen: `cancel` schließt Receipt als cancelled, Episode terminal `cancelled_unobserved`; `resume` liefert idempotent dieselbe Kapsel bei gültiger Lease; `retry` = neuer Attempt (neues Fencing-Token/Receipt/Episode), respektiert `budget.max_attempts`, CAS lässt genau EINEN Gewinner zu; unbekannte/unpassende Zustände sind ehrliche Fehler. | `soul_run` desc | `test/run-lifecycle.test.mjs` (15 Fälle inkl. Retry-Race F03, double-cancel, expired-lease); `test/runs.test.mjs` (v12-Unique-Indizes) |
+| V28 | Kapsel-Skills: nur `promoted`, ≤3, deterministisch task-gematcht; ohne Match KEIN `skills`-Key (byte-identische Pre-Skills-Kapsel); shadow/canary sind nie sichtbar. | `soul_context`-Kapselvertrag (Phase 3) | `test/skills.test.mjs` (`getSkillsForTask` + beide Kapsel-e2e-Tests) |
+| V29 | Skill-Registrierung fail-closed: Positiv-Grammatik (F07), Monotonie-Gesetz (kein grant), Längenlimits, Secret-/URL-Deny, lifecycle-Claims normalisiert auf shadow; Pack-Import nur signiert + gepinnt (TOFU), Downgrade/Replay/Tampering refused, ein schlechtes Manifest refused das GANZE Pack. | CLI/`skills.ts`-Vertrag; SIGNED-PACK-TRUST | `test/skills.test.mjs` (Register-/Lifecycle-/Pack-Negativtests); `test/signed-pack.test.mjs` (Envelope-Schema) |
 
 ### UNGETESTET-Verträge — Stand nach Golden-Transcript-Runde: LEER
 
 Alle drei Lücken sind seit 2026-07-16 durch `test/golden-contracts.test.mjs`
-geschlossen (Tests über den echten MCP-Pfad in test/golden-contracts.test.mjs; Gesamtsuite aktuell 107):
+geschlossen (Tests über den echten MCP-Pfad in test/golden-contracts.test.mjs;
+Gesamtsuite am r3-Freeze-Stand: 107 — aktuelle Zahl siehe Schema-Verträge unten):
 
 - **V10 ✓** — alle sechs User-Autoritäts-Tools je mit/ohne `user_evidence`
   getestet (Ledger-Actor `user` nur mit Beleg; Aktion greift auch ohne, ehrlich
@@ -126,10 +151,12 @@ als ungetestet gelistet; tatsächlich deckt `test/v311-fixes.test.mjs:178` ihn a
 
 | Vertrag | Wert | Quelle |
 |---------|------|--------|
-| DB-Schema-Version | `SCHEMA_VERSION = 9` | `src/kernel/db.ts:18` |
-| Soul-Version (Server-Name/Version) | `SOUL_VERSION = '3.2.0'` | `src/kernel/db.ts:19` |
+| DB-Schema-Version | `SCHEMA_VERSION = 12` (v10: runs/receipts/episodes · v11: skills/trusted_keys/pack_versions · v12: Unique-Indizes je (run, attempt) — alle additiv, unter Backup-Vertrag) | `src/kernel/db.ts:18` |
+| Soul-Version (Server-Name/Version) | `SOUL_VERSION = '3.2.0'` (npm-Bump auf 4.0.0-beta erst nach Phase-2-Akzeptanz) | `src/kernel/db.ts:19` |
 | Passport-Format | `format: 'soul-passport'` | `src/kernel/transfer.ts:25,98` |
-| Passport-Version | `version: '2.0.0'` | `src/kernel/transfer.ts:26,99` |
+| Passport-Version | `version: '2.0.0'` (Writer unverändert; Envelope-Writer noch nicht gebaut) | `src/kernel/transfer.ts:26,99` |
+| Artefakt-Schemas (design/contracts/, 1A) | 8 Schemas: `TaskContract@1` · `SkillManifest@1` · `ReceiptV1` · `VerifierResult@1` · `CapabilityManifest@1` · `Episode@1` · `AuthorityEnvelope@1` · `SignedPackEnvelope@1` — Runtime-Kopien byte-gleich zum Vertrag (Anti-Drift-Test in `test/skills.test.mjs`) | `design/contracts/*.schema.json` |
+| Testsuite | 349 Tests grün via `node --test` über 24 Testdateien (ohne `test/eval-pilot.test.mjs`, parallel in Arbeit; Zähler inkl. Subtests) — Stand 2026-07-17. Historische Zählung „107" bezog sich auf den r3-Freeze-Stand. | `npm test` |
 
 ### Was ein 4.0-Passport additiv ergänzen darf, ohne 2.0.0 zu brechen
 
@@ -154,8 +181,11 @@ tragen, fail-closed hätte jede Addition refused).
    der Envelope-Writer kommt mit 4.0 und exportiert per Default weiter
    2.0.0-kompatibel; Extensions (skills, receipts, …) nur auf Wunsch.
 5. **Schema-Version 9 → 10+ nur mit Migration + Backup** (unverändert:
-   `VACUUM INTO` + `integrity_check`, `test/migration*.test.mjs`).
+   `VACUUM INTO` + `integrity_check`, `test/migration*.test.mjs`). *Baustand:
+   v10/v11/v12 sind unter genau diesem Vertrag geschehen — additiv, mit
+   Pre-Migration-Snapshot; getestet u.a. in `test/runs.test.mjs` (v9→current
+   auf realer DB-Kopie) und `test/skills.test.mjs` (v11/v12-Inhalte).*
 
 ---
 
-*API-Matrix v1 · Bestand Soul 3.2.0 · Phase-0-Deliverable Sol F03/F08 · alle Zeilen aus `src/server.ts` + Test-Suite belegt.*
+*API-Matrix v2 · Bestand Soul 3.2.0 + 4.0-dev-Baustand (Phasen 1A/1B/2-Kontextmodus/3 gebaut, Stand 976b452 + Folgearbeit) · Phase-0-Deliverable Sol F03/F08, nachgeführt 2026-07-17 · alle Zeilen aus `src/server.ts`/`src/cli.ts` + Test-Suite belegt.*
