@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.christian140903-sudo/soul-mcp",
   "description": "A soul for your AI: trusted memory with provenance, an event ledger, conflict detection, prediction calibration and a thinking loop (Denkpartner protocol). Local-first, one SQLite file, no cloud.",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "repository": {
     "url": "https://github.com/christian140903-sudo/soul-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "soul-mcp",
-      "version": "4.0.0",
+      "version": "4.0.1",
       "transport": { "type": "stdio" }
     }
   ]

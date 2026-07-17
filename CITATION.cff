@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: If Soul supports your work, cite the repository and the exact release you used.
+title: "Soul MCP: local-first memory and an auditable runtime for AI agents"
+type: software
+authors:
+  - family-names: Bucher
+    given-names: Christian
+version: 4.0.1
+date-released: 2026-07-17
+url: https://github.com/christian140903-sudo/soul-mcp
+repository-code: https://github.com/christian140903-sudo/soul-mcp
+license: MIT

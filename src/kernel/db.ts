@@ -16,7 +16,7 @@ import { homedir } from 'os';
 import { nowIso, contentHash } from '../util/core.js';
 
 export const SCHEMA_VERSION = 12;
-export const SOUL_VERSION = '4.0.0';
+export const SOUL_VERSION = '4.0.1';
 
 export function getSoulDir(): string {
   const dir = process.env.SOUL_DIR || join(homedir(), '.soul');

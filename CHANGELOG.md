@@ -1,5 +1,35 @@
 # Changelog
 
+## 4.0.1 — 2026-07-17
+
+Reliability and public-product patch. No MCP tool contract, database schema or
+passport format changes.
+
+### Fixed
+- The CLI help banner now reads its version from the runtime instead of
+  claiming `v2`; the source entry points no longer carry stale v2 branding.
+- A newly initialized Soul records the current runtime version and current
+  layers instead of writing a historical v2 initialization sentence.
+- Package and MCP registry metadata are version-locked by tests so npm,
+  `server.json`, the runtime and the README cannot silently drift apart.
+
+### Added
+- GitHub Actions CI across Node 18, 20 and 22, plus a package-content smoke
+  check on Node 22.
+- Public-claim regression tests. The README must keep the central honesty
+  boundaries visible: no worker, no model benchmark result and no false
+  `deterministic_verified` receipt claim.
+- Security policy, contribution guide, issue forms, pull-request template,
+  Dependabot configuration, architecture and quick-start documentation.
+- A valid shadow-stage SkillManifest example for the v4 registry.
+
+### Changed
+- The README now leads with the user problem, a three-minute install path and
+  the trust model before the implementation history. npm metadata names the
+  human author and the AI collaboration model explicitly.
+- Search metadata now covers Claude Code, Cursor, Windsurf, MCP servers,
+  agent memory and SQLite without making unsupported compatibility claims.
+
 ## 4.0.0 — 2026-07-17
 
 v4 turns work into verified capability — that is the goal: model compute

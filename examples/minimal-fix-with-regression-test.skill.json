@@ -1,0 +1,31 @@
+{
+  "contract": "SkillManifest@1",
+  "name": "minimal-fix-with-regression-test",
+  "version": "1.0.0",
+  "description": "A disciplined bug-fix loop: reproduce, add a failing regression test, make the smallest fix, then run the full suite.",
+  "lifecycle": "shadow",
+  "origin": { "type": "local" },
+  "compatibility": {
+    "models": ["*"],
+    "os": ["darwin", "linux", "win32"],
+    "required_tools": ["test-runner"],
+    "min_context_tokens": 8000
+  },
+  "body": {
+    "steps": [
+      { "id": "reproduce", "instruction": "Reproduce the failure and retain the exact failing output." },
+      { "id": "regression", "instruction": "Add a focused regression test that fails before the implementation change." },
+      { "id": "fix", "instruction": "Implement the smallest change that fixes the demonstrated failure." },
+      { "id": "verify", "instruction": "Run the focused test and the complete available test suite." }
+    ],
+    "rubric": [
+      "The regression test failed before the implementation change",
+      "The final diff contains no unrelated refactor",
+      "The complete available test suite passes"
+    ],
+    "verifier_hints": ["Capture the test command and exit code", "Inspect the final diff for scope drift"],
+    "context_recipe": { "memory_types": ["error", "solution"], "token_budget": 2000 },
+    "io_schema": { "type": "object", "required": ["fixed_files", "regression_test", "verification"] }
+  },
+  "created_at": "2026-07-17T18:00:00Z"
+}
