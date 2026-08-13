@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { getSoulDir } from './db.js';
 
 export type StoreRule = 'auto' | 'confirm' | 'never';
@@ -99,15 +99,24 @@ export const DEFAULT_CONSTITUTION: Constitution = {
 };
 
 let _cached: Constitution | null = null;
+let _cachedMtimeMs: number | null = null;
 
 export function constitutionPath(): string {
   return join(getSoulDir(), 'constitution.json');
 }
 
+function statMtimeMs(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 export function loadConstitution(): Constitution {
-  const cached = _cached;
-  if (cached) return cached;
   const path = constitutionPath();
+  const currentMtimeMs = statMtimeMs(path);
+  if (_cached && currentMtimeMs === _cachedMtimeMs) return _cached;
   let loaded: Constitution;
   if (!existsSync(path)) {
     writeFileSync(path, JSON.stringify(DEFAULT_CONSTITUTION, null, 2));
@@ -131,11 +140,13 @@ export function loadConstitution(): Constitution {
     }
   }
   _cached = loaded;
+  _cachedMtimeMs = statMtimeMs(path);
   return loaded;
 }
 
 export function resetConstitutionCache(): void {
   _cached = null;
+  _cachedMtimeMs = null;
 }
 
 export function storeRuleFor(category: string): StoreRule {
