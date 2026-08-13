@@ -91,7 +91,8 @@ export async function recall(query: string, opts: RecallOptions = {}): Promise<S
          ORDER BY bm25_rank LIMIT ?`
       )
       .all(ftsQuery, ...params, limit * 4);
-  } catch {
+  } catch (err) {
+    console.error('[soul] FTS query failed, falling back to no lexical matches:', err);
     rows = [];
   }
 
