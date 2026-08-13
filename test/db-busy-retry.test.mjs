@@ -4,7 +4,7 @@ import { freshSoulDir } from './helpers.mjs';
 
 freshSoulDir('db-busy-retry');
 
-const { withBusyRetry } = await import('../dist/src/kernel/db.js');
+const { withBusyRetry, getDb, closeDb } = await import('../dist/src/kernel/db.js');
 
 function busyError() {
   const err = new Error('database is locked');
@@ -52,3 +52,32 @@ test('withBusyRetry does not retry errors other than SQLITE_BUSY / SQLITE_LOCKED
   );
   assert.equal(calls, 1, 'a non-busy error must fail fast, not retry');
 });
+
+test('getDb() wraps db.transaction() with retry at the connection level (chokepoint, no per-call-site opt-in)', () => {
+  const db = getDb();
+  let calls = 0;
+  const tx = db.transaction(() => {
+    calls++;
+    if (calls < 3) throw busyError();
+    return 'ok';
+  });
+  // Called exactly like every real kernel call site: tx(), no manual wrapping.
+  const result = tx();
+  assert.equal(result, 'ok');
+  assert.equal(calls, 3);
+});
+
+test('the .immediate() transaction variant also retries at the chokepoint', () => {
+  const db = getDb();
+  let calls = 0;
+  const tx = db.transaction(() => {
+    calls++;
+    if (calls < 2) throw busyError();
+    return 'ok';
+  });
+  const result = tx.immediate();
+  assert.equal(result, 'ok');
+  assert.equal(calls, 2);
+});
+
+test.after(() => closeDb());

@@ -10,7 +10,7 @@
  * pairs as 'disputed' instead of silently overwriting either one.
  */
 
-import { getDb, withBusyRetry } from './db.js';
+import { getDb } from './db.js';
 import { appendEvent } from './ledger.js';
 import {
   storeRuleFor,
@@ -272,7 +272,7 @@ export function capture(input: CaptureInput): CaptureResult {
       }, { actor });
     }
   });
-  withBusyRetry(tx);
+  tx();
 
   // Semantic layer (optional): embed asynchronously; the backfill sweep
   // covers any embed that fails or races a shutdown. Quarantined content is
@@ -340,7 +340,7 @@ function detectConflicts(memory: Memory): string[] {
         appendEvent('memory.disputed', 'memory', memory.id, { contradicts: otherId }, {});
       }
     });
-    withBusyRetry(tx);
+    tx();
   }
   return conflicts;
 }
@@ -405,7 +405,7 @@ export function confirmMemory(
       ...(evidence ? { user_evidence: evidence } : {}),
     }, { actor });
   });
-  withBusyRetry(tx);
+  tx();
   return getMemoryById(id);
 }
 
@@ -480,7 +480,7 @@ export function correctMemory(
         ...(evidence ? { user_evidence: evidence } : {}),
       }, { actor });
     });
-    withBusyRetry(tx);
+    tx();
     result.memory = getMemoryById(result.memory.id);
   }
   return result;
@@ -516,7 +516,7 @@ export function forgetMemory(id: string, opts: { hard?: boolean; userEvidence?: 
       }, { actor });
     }
   });
-  withBusyRetry(tx);
+  tx();
   return true;
 }
 
@@ -557,7 +557,7 @@ export function applyMemoryFeedback(
       } else ignored++;
     }
   });
-  withBusyRetry(tx);
+  tx();
   return { used, unhelpful, ignored };
 }
 
@@ -616,7 +616,7 @@ export function expireStaleCandidates(maxAgeMs: number): number {
       appendEvent('memory.expired', 'memory', row.id, { reason: 'candidate confirmation window elapsed' }, {});
     }
   });
-  withBusyRetry(tx);
+  tx();
   return stale.length;
 }
 

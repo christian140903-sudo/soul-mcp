@@ -46,6 +46,7 @@ export function getDb(): Database.Database {
   // Multiple MCP processes (Claude + Codex + starter pulse) share this file:
   // wait for locks instead of failing fast.
   db.pragma('busy_timeout = 5000');
+  wrapTransactionsWithRetry(db);
 
   const version = detectSchemaVersion(db);
   if (version < SCHEMA_VERSION) {
@@ -63,11 +64,36 @@ export function getDb(): Database.Database {
 }
 
 /**
+ * Chokepoint: every `db.transaction(fn)` call across the kernel (~28 call
+ * sites) goes through this one connection method, so wrapping it here gives
+ * every one of them busy/locked retry for free — no per-call-site changes.
+ * Applied once, right after the connection (and its busy_timeout pragma) is
+ * created. Covers the default call plus the .default/.deferred/.immediate/
+ * .exclusive mode variants, since a few call sites use `tx.immediate()`.
+ */
+function wrapTransactionsWithRetry(db: Database.Database): void {
+  const originalTransaction = db.transaction.bind(db);
+  db.transaction = ((fn: (...args: unknown[]) => unknown) => {
+    const base = originalTransaction(fn);
+    const retrying = (variant: (...args: unknown[]) => unknown) => (...args: unknown[]) =>
+      withBusyRetry(() => variant(...args));
+    const wrapped = retrying(base) as unknown as ReturnType<Database.Database['transaction']>;
+    wrapped.default = retrying(base.default);
+    wrapped.deferred = retrying(base.deferred);
+    wrapped.immediate = retrying(base.immediate);
+    wrapped.exclusive = retrying(base.exclusive);
+    return wrapped;
+  }) as Database.Database['transaction'];
+}
+
+/**
  * Multiple MCP processes (Claude + Codex + starter pulse) can write at the
  * same time. `busy_timeout` already makes SQLite wait inside a single call,
  * but a WAL writer can still lose the race and come back SQLITE_BUSY /
- * SQLITE_LOCKED. Retry the central write-transaction paths a few times with
- * a short backoff before giving up; anything else is rethrown immediately.
+ * SQLITE_LOCKED. Retry a few times with a short backoff before giving up;
+ * anything else is rethrown immediately. Used directly by
+ * wrapTransactionsWithRetry(); exported because it is also a useful,
+ * self-contained retry primitive on its own.
  */
 export function withBusyRetry<T>(fn: () => T, attempts = 3, baseDelayMs = 25): T {
   let lastErr: unknown;

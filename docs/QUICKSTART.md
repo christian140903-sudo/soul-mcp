@@ -71,8 +71,7 @@ npx -y soul-mcp export
 npx -y soul-mcp semantic on
 ```
 
-This is opt-in because it installs an additional local dependency and
-downloads an embedding model. Keyword retrieval remains available without it.
+This is opt-in because it installs an additional local dependency and downloads a local embedding model (~380 MB). Keyword-based retrieval (`soul_recall`, `soul_context`) remains fully available without it and requires no additional downloads.
 
 ## Troubleshooting
 

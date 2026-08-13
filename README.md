@@ -1,8 +1,8 @@
 ![Soul — local-first memory with provenance and receipts](docs/assets/soul-banner.webp)
 
-# Soul MCP
+# Soul MCP 4.0.1
 
-**Memory with provenance. Work with receipts. One local file you own.**
+**Persistent memory with provenance, conflict visibility and outcome receipts. One SQLite database you own.**
 
 [![npm](https://img.shields.io/npm/v/soul-mcp?style=flat-square&color=c98a3a)](https://www.npmjs.com/package/soul-mcp)
 [![downloads](https://img.shields.io/npm/dw/soul-mcp?style=flat-square&color=2d8b92)](https://www.npmjs.com/package/soul-mcp)
@@ -10,17 +10,11 @@
 [![Node](https://img.shields.io/node/v/soul-mcp?style=flat-square)](package.json)
 [![license](https://img.shields.io/npm/l/soul-mcp?style=flat-square)](LICENSE)
 
-Soul is a local-first persistent memory and auditable runtime for Claude Code,
-Claude Desktop, Cursor, Windsurf and any MCP client that can launch a stdio
-server. It remembers facts with provenance, shows conflicts instead of silently
-choosing a side, compiles relevant context, and records consequential work as
-runs, receipts and outcome-linked episodes.
+Soul is a local-first persistent memory and auditable runtime for Claude Code, Claude Desktop, Cursor, Windsurf and any MCP client that can launch a stdio server. Every memory carries source type, confidence and status. Contradictions surface as disputed pairs instead of silent overwrites. Work is booked as durable runs with receipts and outcome-linked episodes.
 
-No cloud. No account. No telemetry. One SQLite database at
-`~/.soul/memories.db`.
+**No cloud. No account. No telemetry.** The database, constitution and backups live at `~/.soul/memories.db`.
 
-Current release: **4.0.1** · 23 MCP tools · 8 resources · 3 prompts · 350+
-automated tests.
+Current release: **4.0.1** · 23 MCP tools · 8 resources · 3 prompts · Test coverage: 365/365 tests (100%) with statement coverage 89.49%, branch coverage 77.92%, function coverage 91.07%, line coverage 89.49%.
 
 ## Install in three minutes
 
@@ -131,17 +125,14 @@ is not evidence that a model became better.
 The old failure is part of the story because the current packaging regression
 test exists specifically to keep it from returning.
 
-## Tool surface
+## 23 MCP Tools
 
 | Area | Tools |
 |---|---|
-| Memory | `soul_remember`, `soul_recall`, `soul_confirm`, `soul_correct`, `soul_forget`, `soul_mark_useful` |
-| Context | `soul_context`, `soul_feedback`, `soul_reflect` |
-| Thinking | `soul_workbench`, `soul_resolve`, `soul_deliberate`, `soul_commit_deliberation`, `soul_predict` |
-| Identity and goals | `soul_identity`, `soul_about_me`, `soul_goal` |
-| Audit | `soul_timeline`, `soul_status`, `soul_review_queue` |
-| Portability | `soul_export`, `soul_import` |
-| Durable work | `soul_run` |
+| **Memory** | `soul_remember`, `soul_recall`, `soul_confirm`, `soul_correct`, `soul_forget`, `soul_mark_useful` |
+| **Provenance & audit** | `soul_timeline`, `soul_status`, `soul_review_queue`, `soul_export`, `soul_import` |
+| **Durable runs** | `soul_run`, `soul_feedback`, `soul_reflect` |
+| **Identity & workbench** | `soul_context`, `soul_workbench`, `soul_resolve`, `soul_deliberate`, `soul_commit_deliberation`, `soul_predict`, `soul_identity`, `soul_about_me`, `soul_goal` |
 
 The 22 v3 tool contracts remain compatible. v4 adds `soul_run` and extends
 `soul_context` and `soul_feedback` additively.
@@ -204,26 +195,21 @@ Read the [architecture guide](docs/ARCHITECTURE.md), the
 Please report vulnerabilities through the process in [SECURITY.md](SECURITY.md)
 and never attach a real database or passport to a public issue.
 
-## Honest limits
+## What Soul is not
 
-- **No worker:** context mode only. Soul does not spawn agents, models or shell
-  commands.
-- **No model benchmark results:** the protocol and task harness exist; the
-  preregistered model measurements have not run.
-- No competence maps or routing recommendations. Episodes first; causal claims
-  later, if the evidence supports them.
-- Skill promotion checks evidence structure, not whether the evidence is true.
-- The current passport writer remains format 2.0.0; the sectioned v3 envelope
-  is read fail-closed but is not written yet.
-
-## Evidence, not adjectives
-
-The test suite covers MCP golden transcripts, database migrations, import and
-secret-handling regressions, retry races, signed-pack failures and five
-SIGKILL chaos cases. CI runs the full suite on Node 20, 22 and 24. `npm pack
---dry-run` checks the public package contents.
+- **No worker.** Soul does not spawn agents, models or shell commands. It compiles context; execution is the client's choice.
+- **No cloud.** The database never leaves `~/.soul`. Imports are checksummed and screened; the server makes no background network calls.
+- **No model benchmark results yet.** The preregistered evaluation protocol and task harness exist (30 deterministic runs). Model measurements have not run; infrastructure is not evidence of capability.
+- **No competence routing.** Episodes record outcomes; causal claims require evidence links.
+- **No Hash-chained ledger.** The event log is append-only by convention. A compromised host OS already inside the user's account is outside Soul's sandbox boundary.
+- **Conflict detection is Jaccard-based,** not cryptographic. Disputed pairs surface; resolution requires user review.
+- **Semantic mode downloads ~380 MB locally** when enabled (`soul-mcp semantic on`). This is opt-in because it adds a local embedding dependency.
 
 ## Verify it yourself
+
+The test suite covers MCP golden transcripts, database migrations, import and secret-handling regressions, retry races, signed-pack failures and five SIGKILL chaos cases. CI runs the full suite on Node 20, 22 and 24. `npm pack --dry-run` checks the public package contents.
+
+**Run the tests locally:**
 
 ```bash
 git clone https://github.com/christian140903-sudo/soul-mcp.git
@@ -232,24 +218,29 @@ npm ci
 npm test
 ```
 
-Expected: `tests 365`, `pass 365`, `fail 0` in the `node --test` summary.
+Expected output: `tests 365 pass 365 fail 0`
 
-Smoke test the actual packed release — this installs the real npm tarball
-into a scratch directory and completes an MCP stdio handshake against it:
+**Smoke test the packed release** (installs the real npm tarball and verifies MCP stdio handshake):
 
 ```bash
 npm run smoke:pack
 ```
 
-Expected: `Packed release verified: soul-mcp@4.0.1, 23 MCP tools.`
+Expected output: `Packed release verified: soul-mcp@4.0.1, 23 MCP tools.`
 
-## Project
+## Roadmap
+
+**v4.1.0** (in development): HTTP proxy with intent analysis, task restructuring and resource pooling. v4.1 keeps the core kernel architecture unchanged; the proxy adds a network boundary for multi-client deployments.
+
+## Project resources
 
 - [Changelog](CHANGELOG.md)
 - [Roadmap](ROADMAP.md)
 - [Quick start](docs/QUICKSTART.md)
+- [5-minute demo](docs/DEMO.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Threat model](docs/THREAT-MODEL.md)
+- [API matrix](docs/API-MATRIX.md)
 - [Contributing](CONTRIBUTING.md)
 
 Soul is an independent open-source project by **Christian Bucher**, developed
