@@ -65,6 +65,40 @@ test('contradicting preferences are flagged disputed, not overwritten', () => {
   assert.ok(bNow.contradicts.includes(a.memory.id));
 });
 
+test('conflict candidate query is deterministic and always considers the newest candidates (regression: LIMIT 200 needs ORDER BY)', () => {
+  const db = getDb();
+  const insertRaw = db.prepare(
+    `INSERT INTO memories (id, content, content_hash, type, namespace, status, created_at, updated_at)
+     VALUES (?, ?, ?, 'preference', 'default', 'active', ?, ?)`
+  );
+  const base = Date.now() - 10_000_000;
+  const FILLER_COUNT = 260;
+  for (let i = 0; i < FILLER_COUNT; i++) {
+    const createdAt = new Date(base + i * 1000).toISOString();
+    insertRaw.run(
+      `mem_filler_${String(i).padStart(4, '0')}`,
+      `Filler note about unrelated deployment topic entry${i} configuration${i}`,
+      `fakehash_${i}`,
+      createdAt,
+      createdAt
+    );
+  }
+  // The target is the single newest candidate, inserted well after every filler above.
+  // With no ORDER BY, a plain `LIMIT 200` scan tends to return the oldest rows first,
+  // silently dropping the newest (and most relevant) candidates from conflict checks.
+  const targetId = 'mem_filler_target';
+  const targetCreatedAt = new Date(base + (FILLER_COUNT + 1) * 1000).toISOString();
+  insertRaw.run(targetId, 'User prefers navy editor theme in vscode', 'fakehash_target', targetCreatedAt, targetCreatedAt);
+
+  const a = capture({ content: 'User prefers teal editor theme in vscode', type: 'preference' });
+  assert.equal(a.outcome, 'stored');
+  assert.ok(
+    a.conflicts.includes(targetId),
+    `expected the newest candidate (${targetId}) to be considered despite ${FILLER_COUNT} older candidates, got ${JSON.stringify(a.conflicts)}`
+  );
+  assert.equal(getMemoryById(targetId).status, 'disputed');
+});
+
 test('correction supersedes instead of mutating', () => {
   const orig = capture({ content: 'The project deadline is August 15' });
   const corr = correctMemory(orig.memory.id, 'The project deadline is August 30');

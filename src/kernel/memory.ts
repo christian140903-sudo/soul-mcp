@@ -316,6 +316,7 @@ function detectConflicts(memory: Memory): string[] {
       `SELECT id, content FROM memories
        WHERE type = ? AND namespace = ? AND id != ?
        AND status IN ('active','confirmed','disputed')
+       ORDER BY created_at DESC, id DESC
        LIMIT 200`
     )
     .all(memory.type, memory.namespace, memory.id) as Array<{ id: string; content: string }>;
