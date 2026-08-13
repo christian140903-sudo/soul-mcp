@@ -230,7 +230,7 @@ Expected output: `Packed release verified: soul-mcp@4.0.1, 23 MCP tools.`
 
 ## Roadmap
 
-**v4.1.0** (in development): HTTP proxy with intent analysis, task restructuring and resource pooling. v4.1 keeps the core kernel architecture unchanged; the proxy adds a network boundary for multi-client deployments.
+**v4.1.0** (in development): HTTP proxy with intent analysis and task restructuring. v4.1 keeps the core kernel architecture unchanged; the proxy adds a network boundary for multi-client deployments.
 
 ## Project resources
 
