@@ -64,6 +64,22 @@ export interface ScoredMemory extends Memory {
 const WEIGHTS_LEXICAL = { fts: 0.45, semantic: 0, confidence: 0.2, importance: 0.15, recency: 0.1, usage: 0.1 };
 const WEIGHTS_HYBRID = { fts: 0.3, semantic: 0.3, confidence: 0.15, importance: 0.1, recency: 0.1, usage: 0.05 };
 
+// A persistently broken FTS index (e.g. a corrupt table) would otherwise log
+// on every single recall(). Log the first failure in full, then throttle to
+// once per 1000 to keep the signal without flooding stderr; resets per
+// process (an in-memory counter, not persisted).
+let ftsFailureCount = 0;
+
+function logFtsFailure(err: unknown): void {
+  ftsFailureCount++;
+  if (ftsFailureCount === 1 || ftsFailureCount % 1000 === 0) {
+    console.error(
+      `[soul] FTS query failed (${ftsFailureCount}x this process), falling back to no lexical matches:`,
+      err
+    );
+  }
+}
+
 export async function recall(query: string, opts: RecallOptions = {}): Promise<ScoredMemory[]> {
   const db = getDb();
   const constitution = loadConstitution();
@@ -92,7 +108,7 @@ export async function recall(query: string, opts: RecallOptions = {}): Promise<S
       )
       .all(ftsQuery, ...params, limit * 4);
   } catch (err) {
-    console.error('[soul] FTS query failed, falling back to no lexical matches:', err);
+    logFtsFailure(err);
     rows = [];
   }
 
