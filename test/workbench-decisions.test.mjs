@@ -37,7 +37,7 @@ test('keep_separate is terminal: the merge pair is never re-issued', async () =>
     )
   );
   const a = capture({ content: 'The starter script lives in the repo under agent/', sourceType: 'agent_inference' });
-  const b = capture({ content: 'The desktop starter is only a pointer to the repo script', sourceType: 'agent_inference' });
+  const _b = capture({ content: 'The desktop starter is only a pointer to the repo script', sourceType: 'agent_inference' });
   await backfillVectors();
 
   const assignment = findAssignment(computeAssignments(), 'merge_review', a.memory.id);
@@ -191,7 +191,7 @@ test('a resolution the guards reject leaves the assignment open (no silent resol
     )
   );
   const a = capture({ content: 'The cockpit shows the backup age in hours', sourceType: 'agent_inference' });
-  const b = capture({ content: 'Cockpit displays backup age (hours) prominently', sourceType: 'agent_inference' });
+  const _b = capture({ content: 'Cockpit displays backup age (hours) prominently', sourceType: 'agent_inference' });
   await backfillVectors();
 
   const assignment = findAssignment(computeAssignments(), 'merge_review', a.memory.id);

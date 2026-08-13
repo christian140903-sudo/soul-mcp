@@ -10,7 +10,7 @@ freshSoulDir('v311-fixes');
 
 const { capture, forgetMemory, getMemoryById } = await import('../dist/src/kernel/memory.js');
 const { recall } = await import('../dist/src/kernel/retrieval.js');
-const { exportAll, importAll } = await import('../dist/src/kernel/transfer.js');
+const { importAll } = await import('../dist/src/kernel/transfer.js');
 const { detectSecret } = await import('../dist/src/kernel/policy.js');
 const { queryEvents } = await import('../dist/src/kernel/ledger.js');
 const { closeDb, getDb } = await import('../dist/src/kernel/db.js');

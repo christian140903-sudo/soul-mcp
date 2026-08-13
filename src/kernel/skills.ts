@@ -48,7 +48,6 @@ import { SKILL_MANIFEST_SCHEMA, SIGNED_PACK_ENVELOPE_SCHEMA } from './skill-cont
 // ─── Schema validation (ajv, same dialect as the contract tests) ──────
 
 const Ajv2020 = (AjvModule as unknown as { default?: unknown }).default ?? AjvModule;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ajv = new (Ajv2020 as any)({ strict: false, allErrors: true, validateFormats: false });
 const validateManifestSchema = ajv.compile(SKILL_MANIFEST_SCHEMA);
 const validateEnvelopeSchema = ajv.compile(SIGNED_PACK_ENVELOPE_SCHEMA);

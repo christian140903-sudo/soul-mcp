@@ -19,7 +19,7 @@ const { getDb, closeDb, SCHEMA_VERSION } = await import('../dist/src/kernel/db.j
 // v7/v8 columns already exist and must be tolerated (addColumnIfMissing).
 test('version-rewind v5 state (with live WAL content) migrates forward with a verified, restorable backup', () => {
   // 1. Build real content on the current schema
-  const a = capture({ content: 'User prefers sqlite for local persistence', type: 'preference', sourceType: 'agent_inference' });
+  const _a = capture({ content: 'User prefers sqlite for local persistence', type: 'preference', sourceType: 'agent_inference' });
   const b = capture({ content: 'User prefers postgres for local persistence', type: 'preference', sourceType: 'agent_inference' });
   assert.ok(b.conflicts.length >= 1);
   const assignment = computeAssignments().find((x) => x.kind === 'dispute');

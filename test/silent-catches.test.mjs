@@ -91,7 +91,7 @@ test('memory.ts safeParseArray: corrupt stored tags fall back to [] instead of t
 });
 
 test('skills.ts getSkillsForTask: a corrupt manifest is excluded (not thrown), and logged', () => {
-  const good = registerSkill(makeManifest('good-manifest-skill'));
+  const _good = registerSkill(makeManifest('good-manifest-skill'));
   const bad = registerSkill(makeManifest('bad-manifest-skill'));
   assert.equal(transitionSkill('good-manifest-skill', 'canary').ok, true);
   assert.equal(transitionSkill('good-manifest-skill', 'promoted', { evidence: { eval_refs: ['e1'] } }).ok, true);

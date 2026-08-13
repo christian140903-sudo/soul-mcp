@@ -15,6 +15,7 @@
     "test": "npm run build && node scripts/run-tests.mjs",
     "coverage": "c8 --reporter=text --reporter=lcov --include \"dist/src/**\" npm test",
     "check-coverage": "c8 check-coverage --include \"dist/src/**\" --statements 88 --branches 75 --functions 89 --lines 88",
+    "lint": "eslint .",
     "prepack": "npm run build",
     "smoke:pack": "node scripts/release-smoke.mjs",
     "prepublishOnly": "npm run test"
@@ -73,10 +74,14 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "c8": "^12.0.0",
-    "typescript": "^5.7.0"
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.67.0"
   },
   "mcpName": "io.github.christian140903-sudo/soul-mcp"
 }
