@@ -94,6 +94,14 @@ function wrapTransactionsWithRetry(db: Database.Database): void {
  * anything else is rethrown immediately. Used directly by
  * wrapTransactionsWithRetry(); exported because it is also a useful,
  * self-contained retry primitive on its own.
+ *
+ * The backoff sleeps are synchronous (sleepSync/Atomics.wait) and, with the
+ * defaults below, add at most ~75ms total (25 + 50ms across two waits)
+ * before the 3rd attempt. That is accepted deliberately: better-sqlite3 is
+ * a synchronous API end to end — a single call can already block for up to
+ * `busy_timeout` (5s) inside SQLite itself — so a few tens of ms of
+ * additional synchronous backoff on top does not change the caller's
+ * blocking characteristics in kind, only in degree.
  */
 export function withBusyRetry<T>(fn: () => T, attempts = 3, baseDelayMs = 25): T {
   let lastErr: unknown;
