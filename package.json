@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "prepack": "npm run build",
     "smoke:pack": "node scripts/release-smoke.mjs",
+    "perf-baseline": "npm run build && node scripts/perf-baseline.mjs",
     "prepublishOnly": "npm run test"
   },
   "keywords": [

@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-08-13T22:52:36.697Z",
+  "soul_version": "4.0.1",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "os_release": "25.2.0",
+    "node_version": "v25.9.0",
+    "cpu": "Apple M3",
+    "ram_gb": 16
+  },
+  "semantic_layer": "off — lexical-only recall (embedding model never downloaded or configured)",
+  "methodology": {
+    "corpus": "cumulative across stages; content is deterministic (index-based), not random",
+    "stages": [
+      1000,
+      10000,
+      50000
+    ],
+    "queries_per_group_per_stage": 50,
+    "warmup_queries_per_group": 5,
+    "insert_batch_size": 2500,
+    "recall_call": "default (non-silent) — includes the access_count/ledger-event write on hits",
+    "caveat": "single local machine, single process, no concurrent load — a baseline snapshot, not a load test"
+  },
+  "stages": [
+    {
+      "cumulative_memories": 1000,
+      "insert_ms_for_this_stage": 1981,
+      "insert_memories_per_sec": 505,
+      "recall_with_fts_hits": {
+        "n": 50,
+        "p50_ms": 0.45,
+        "p95_ms": 0.72
+      },
+      "recall_without_fts_hits": {
+        "n": 50,
+        "p50_ms": 0.2,
+        "p95_ms": 0.22
+      }
+    },
+    {
+      "cumulative_memories": 10000,
+      "insert_ms_for_this_stage": 28055,
+      "insert_memories_per_sec": 321,
+      "recall_with_fts_hits": {
+        "n": 50,
+        "p50_ms": 0.82,
+        "p95_ms": 2.08
+      },
+      "recall_without_fts_hits": {
+        "n": 50,
+        "p50_ms": 1.37,
+        "p95_ms": 2.1
+      }
+    },
+    {
+      "cumulative_memories": 50000,
+      "insert_ms_for_this_stage": 192713,
+      "insert_memories_per_sec": 208,
+      "recall_with_fts_hits": {
+        "n": 50,
+        "p50_ms": 3.46,
+        "p95_ms": 15.98
+      },
+      "recall_without_fts_hits": {
+        "n": 50,
+        "p50_ms": 18.68,
+        "p95_ms": 22.06
+      }
+    }
+  ]
+}
