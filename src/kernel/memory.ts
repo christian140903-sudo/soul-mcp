@@ -750,7 +750,8 @@ function safeParseArray(s: string): string[] {
   try {
     const parsed = JSON.parse(s);
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (err) {
+    console.error('[soul] failed to parse stored array JSON, falling back to []:', err);
     return [];
   }
 }

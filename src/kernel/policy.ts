@@ -134,8 +134,9 @@ export function loadConstitution(): Constitution {
           default: parsed.model_profiles?.default ?? DEFAULT_CONSTITUTION.model_profiles.default,
         },
       };
-    } catch {
+    } catch (err) {
       // A corrupt constitution must not silently weaken policy: fall back to defaults.
+      console.error('[soul] constitution.json is corrupt, falling back to defaults:', err);
       loaded = DEFAULT_CONSTITUTION;
     }
   }

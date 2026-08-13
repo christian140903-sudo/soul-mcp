@@ -125,7 +125,8 @@ export async function embedQuery(text: string): Promise<Float32Array | null> {
   if (!embed) return null;
   try {
     return (await embed([`query: ${text}`]))[0] ?? null;
-  } catch {
+  } catch (err) {
+    console.error('[soul] query embedding failed, falling back to lexical-only recall:', err);
     return null;
   }
 }
@@ -231,7 +232,8 @@ export async function embedAndStore(memoryId: string, content: string): Promise<
     if (!vec) return false;
     upsertVector(memoryId, vec);
     return true;
-  } catch {
+  } catch (err) {
+    console.error(`[soul] failed to embed/store vector for memory ${memoryId}:`, err);
     return false;
   }
 }
@@ -271,8 +273,9 @@ export async function backfillVectors(
           embedded++;
         }
       }
-    } catch {
+    } catch (err) {
       // skip this batch; a later sweep retries
+      console.error('[soul] backfill batch failed, will retry on the next sweep:', err);
     }
     opts.onProgress?.(Math.min(i + batch, rows.length), rows.length);
   }

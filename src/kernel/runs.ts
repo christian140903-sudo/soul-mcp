@@ -917,7 +917,8 @@ function safeJson(s: string | null): Record<string, unknown> {
   if (!s) return {};
   try {
     return JSON.parse(s) as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    console.error('[soul] failed to parse stored run JSON, falling back to {}:', err);
     return {};
   }
 }

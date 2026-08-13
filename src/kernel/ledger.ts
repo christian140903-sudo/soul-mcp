@@ -206,7 +206,8 @@ function rowToEvent(row: any): SoulEvent {
 function safeJson(s: string): Record<string, unknown> {
   try {
     return JSON.parse(s);
-  } catch {
+  } catch (err) {
+    console.error('[soul] failed to parse stored event payload, falling back to {}:', err);
     return {};
   }
 }

@@ -374,7 +374,8 @@ export function transitionSkill(
       let contract: { skill_refs?: Array<{ name?: string; version?: string }> };
       try {
         contract = JSON.parse(r.task_contract);
-      } catch {
+      } catch (err) {
+        console.error(`[soul] failed to parse task_contract for run ${r.run_id}, skipping in revoke sweep:`, err);
         continue;
       }
       const refs = Array.isArray(contract.skill_refs) ? contract.skill_refs : [];
@@ -465,7 +466,8 @@ export function getSkillsForTask(
     let manifest: SkillManifest;
     try {
       manifest = JSON.parse(row.manifest) as SkillManifest;
-    } catch {
+    } catch (err) {
+      console.error(`[soul] failed to parse manifest for skill ${row.skill_id}, excluding from task matching:`, err);
       continue;
     }
     const compat = manifest.compatibility;
@@ -510,7 +512,11 @@ export function listSkills(): Array<{
   const rows = db.prepare(`SELECT * FROM skills ORDER BY name ASC, version ASC`).all() as SkillRow[];
   return rows.map((r) => {
     let description = '';
-    try { description = (JSON.parse(r.manifest) as SkillManifest).description; } catch { /* keep empty */ }
+    try {
+      description = (JSON.parse(r.manifest) as SkillManifest).description;
+    } catch (err) {
+      console.error(`[soul] failed to parse manifest for skill ${r.skill_id}, description left empty:`, err);
+    }
     return {
       skill_id: r.skill_id, name: r.name, version: r.version,
       lifecycle: r.lifecycle_state, source: r.source,
@@ -575,7 +581,8 @@ function verifyEnvelopeSignature(env: SignedPackEnvelope): boolean {
     const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), raw]);
     const key = createPublicKey({ key: spki, format: 'der', type: 'spki' });
     return cryptoVerify(null, Buffer.from(signingHeader(env), 'utf8'), key, sig);
-  } catch {
+  } catch (err) {
+    console.error('[soul] signature verification failed with an unexpected error (failing closed):', err);
     return false;
   }
 }
