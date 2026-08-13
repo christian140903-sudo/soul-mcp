@@ -218,17 +218,30 @@ and never attach a real database or passport to a public issue.
 
 ## Evidence, not adjectives
 
-The 4.0 release baseline passed 355 tests, including MCP golden transcripts,
-database migrations, import and secret-handling regressions, retry races,
-signed-pack failures and five SIGKILL chaos cases. CI now runs the full suite on
-Node 20, 22 and 24. `npm pack --dry-run` checks the public package contents.
+The test suite covers MCP golden transcripts, database migrations, import and
+secret-handling regressions, retry races, signed-pack failures and five
+SIGKILL chaos cases. CI runs the full suite on Node 20, 22 and 24. `npm pack
+--dry-run` checks the public package contents.
 
-Run it yourself:
+## Verify it yourself
 
 ```bash
+git clone https://github.com/christian140903-sudo/soul-mcp.git
+cd soul-mcp
 npm ci
 npm test
 ```
+
+Expected: `tests 365`, `pass 365`, `fail 0` in the `node --test` summary.
+
+Smoke test the actual packed release — this installs the real npm tarball
+into a scratch directory and completes an MCP stdio handshake against it:
+
+```bash
+npm run smoke:pack
+```
+
+Expected: `Packed release verified: soul-mcp@4.0.1, 23 MCP tools.`
 
 ## Project
 
