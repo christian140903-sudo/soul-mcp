@@ -100,14 +100,25 @@ export const DEFAULT_CONSTITUTION: Constitution = {
 
 let _cached: Constitution | null = null;
 let _cachedMtimeMs: number | null = null;
+let _cachedSize: number | null = null;
 
 export function constitutionPath(): string {
   return join(getSoulDir(), 'constitution.json');
 }
 
-function statMtimeMs(path: string): number | null {
+/**
+ * Some filesystems (notably ones with 1s mtime resolution) can report the
+ * SAME mtime for two edits that land in the same tick, which would make the
+ * second edit invisible to the cache above. Comparing size alongside mtime
+ * catches edits that also change the byte length; the grace window below
+ * catches same-length edits that don't.
+ */
+const MTIME_GRACE_MS = 2000;
+
+function statSignature(path: string): { mtimeMs: number; size: number } | null {
   try {
-    return statSync(path).mtimeMs;
+    const s = statSync(path);
+    return { mtimeMs: s.mtimeMs, size: s.size };
   } catch {
     return null;
   }
@@ -115,8 +126,14 @@ function statMtimeMs(path: string): number | null {
 
 export function loadConstitution(): Constitution {
   const path = constitutionPath();
-  const currentMtimeMs = statMtimeMs(path);
-  if (_cached && currentMtimeMs === _cachedMtimeMs) return _cached;
+  const sig = statSignature(path);
+  const sameSignature = sig !== null && sig.mtimeMs === _cachedMtimeMs && sig.size === _cachedSize;
+  // A cached mtime younger than the grace window might be one of two (or
+  // more) edits that all rounded to the same on-disk timestamp — don't
+  // trust a signature match until enough real time has passed that any
+  // further edit would be guaranteed to produce a later mtime.
+  const cacheIsRecent = _cachedMtimeMs !== null && Date.now() - _cachedMtimeMs < MTIME_GRACE_MS;
+  if (_cached && sameSignature && !cacheIsRecent) return _cached;
   let loaded: Constitution;
   if (!existsSync(path)) {
     writeFileSync(path, JSON.stringify(DEFAULT_CONSTITUTION, null, 2));
@@ -141,13 +158,16 @@ export function loadConstitution(): Constitution {
     }
   }
   _cached = loaded;
-  _cachedMtimeMs = statMtimeMs(path);
+  const newSig = statSignature(path);
+  _cachedMtimeMs = newSig?.mtimeMs ?? null;
+  _cachedSize = newSig?.size ?? null;
   return loaded;
 }
 
 export function resetConstitutionCache(): void {
   _cached = null;
   _cachedMtimeMs = null;
+  _cachedSize = null;
 }
 
 export function storeRuleFor(category: string): StoreRule {
