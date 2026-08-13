@@ -62,6 +62,33 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+/**
+ * Multiple MCP processes (Claude + Codex + starter pulse) can write at the
+ * same time. `busy_timeout` already makes SQLite wait inside a single call,
+ * but a WAL writer can still lose the race and come back SQLITE_BUSY /
+ * SQLITE_LOCKED. Retry the central write-transaction paths a few times with
+ * a short backoff before giving up; anything else is rethrown immediately.
+ */
+export function withBusyRetry<T>(fn: () => T, attempts = 3, baseDelayMs = 25): T {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return fn();
+    } catch (err) {
+      const code = (err as { code?: string } | undefined)?.code;
+      if (code !== 'SQLITE_BUSY' && code !== 'SQLITE_LOCKED') throw err;
+      lastErr = err;
+      if (i < attempts - 1) sleepSync(baseDelayMs * (i + 1));
+    }
+  }
+  throw lastErr;
+}
+
+/** Synchronous sleep (better-sqlite3 is sync, so no async/await here). */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 export function closeDb(): void {
   if (_db) {
     _db.close();
