@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.0.2 — 2026-08-14
+
+Hardening and evidence patch. No MCP tool contract, database schema or
+passport format changes.
+
+### Fixed
+- Conflict-detection candidate query is now deterministic (`ORDER BY
+  created_at DESC, id DESC` instead of an unordered `LIMIT 200`), with a
+  regression test pinning the ordering.
+- The constitution cache invalidates on file change (mtime + size check
+  plus a 2-second grace window against filesystem timestamp granularity).
+- FTS query failures are logged to stderr (throttled: first occurrence,
+  then every 1000th) instead of being silently swallowed; 11 further
+  silent catch blocks across the kernel now log their fallbacks.
+- All 28 write transactions retry on SQLITE_BUSY/SQLITE_LOCKED via a
+  single chokepoint in `getDb()` (3 attempts, short backoff).
+
+### Added
+- Statement/branch/function/line coverage measurement (c8) with CI
+  thresholds (88/75/89/88); current: 89.61/79.01/91.20/89.61.
+- ESLint (typescript-eslint: no-unused-vars, no-floating-promises) with a
+  CI lint job.
+- `npm publish --provenance` release workflow (tag-triggered).
+- A reproducible "Verify it yourself" section in the README with expected
+  output, and docs/DEMO.md — a 5-minute verifiable walkthrough.
+- A local recall() performance baseline script (`npm run perf-baseline`)
+  with measured results in docs/PERF-BASELINE.md.
+
 ## 4.0.1 — 2026-07-17
 
 Reliability and public-product patch. No MCP tool contract, database schema or

@@ -1,6 +1,6 @@
 {
   "name": "soul-mcp",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "Local-first persistent memory and an auditable runtime for Claude, Cursor, Windsurf and any MCP client. Provenance, conflict handling, receipts and no cloud.",
   "type": "module",
   "main": "dist/src/index.js",

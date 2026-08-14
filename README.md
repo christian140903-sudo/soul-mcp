@@ -14,7 +14,7 @@ Soul is a local-first persistent memory and auditable runtime for Claude Code, C
 
 **No cloud. No account. No telemetry.** The database, constitution and backups live at `~/.soul/memories.db`.
 
-Current release: **4.0.1** · 23 MCP tools · 8 resources · 3 prompts · Test coverage: 365/365 tests (100%) with statement coverage 89.49%, branch coverage 77.92%, function coverage 91.07%, line coverage 89.49%.
+Current release: **4.0.2** · 23 MCP tools · 8 resources · 3 prompts · Test coverage: 373/373 tests with statement coverage 89.61%, branch coverage 79.01%, function coverage 91.20%, line coverage 89.61%.
 
 ## Install in three minutes
 
@@ -218,7 +218,7 @@ npm ci
 npm test
 ```
 
-Expected output: `tests 365 pass 365 fail 0`
+Expected output: `tests 373 pass 373 fail 0`
 
 **Smoke test the packed release** (installs the real npm tarball and verifies MCP stdio handshake):
 

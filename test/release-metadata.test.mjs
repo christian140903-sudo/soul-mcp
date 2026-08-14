@@ -8,7 +8,7 @@ const dbSource = readFileSync(new URL('../src/kernel/db.ts', import.meta.url), '
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 
 test('release metadata: npm, MCP manifest and runtime versions stay aligned', () => {
-  assert.equal(pkg.version, '4.0.1');
+  assert.equal(pkg.version, '4.0.2');
   assert.equal(manifest.version, pkg.version);
   assert.equal(manifest.packages[0].version, pkg.version);
   assert.match(dbSource, new RegExp(`SOUL_VERSION = '${pkg.version.replaceAll('.', '\\.')}'`));

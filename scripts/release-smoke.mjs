@@ -50,7 +50,7 @@ try {
   const environment = { ...process.env, SOUL_DIR: soulDir };
 
   const version = await exec(process.execPath, [entry, '--version'], { env: environment });
-  assert.match(version.stdout, /4\.0\.1/, 'installed CLI must report 4.0.1');
+  assert.match(version.stdout, /4\.0\.2/, 'installed CLI must report 4.0.2');
 
   const example = join(packageRoot, 'examples', 'minimal-fix-with-regression-test.skill.json');
   const registered = await exec(process.execPath, [entry, 'skill', 'register', example], { env: environment });
@@ -85,7 +85,7 @@ try {
     clientInfo: { name: 'soul-release-smoke', version: '1.0.0' },
   });
   assert.equal(initialized.result.serverInfo.name, 'soul');
-  assert.equal(initialized.result.serverInfo.version, '4.0.1');
+  assert.equal(initialized.result.serverInfo.version, '4.0.2');
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
 
   const listed = await request('tools/list');
