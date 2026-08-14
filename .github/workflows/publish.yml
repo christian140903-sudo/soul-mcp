@@ -1,9 +1,10 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  # Tag-Trigger bewusst deaktiviert, solange kein NPM_TOKEN/Trusted
+  # Publisher konfiguriert ist — sonst schlaegt der Lauf bei jedem
+  # Release-Tag sichtbar fehl. Reaktivieren, sobald Trusted Publishing
+  # auf npmjs.com eingerichtet ist.
   workflow_dispatch:
 
 permissions:
