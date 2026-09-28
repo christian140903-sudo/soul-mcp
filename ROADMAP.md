@@ -17,6 +17,9 @@ Soul's roadmap is ordered by evidence, not feature count.
   marketplace;
 - measurement of retrieval changes against real, consented query feedback;
 - the preregistered model-evaluation wave already described in `eval/`.
+- correction propagation: record which memories a stored conclusion or a run
+  drew on, so that revoking a memory can mark what was derived from it as
+  doubtful instead of leaving it silently in place (design stage, not started).
 
 These are candidates, not release promises. Each needs its own compatibility,
 privacy and causal-evidence gate.

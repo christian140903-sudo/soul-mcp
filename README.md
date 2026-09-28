@@ -1,6 +1,6 @@
 ![Soul — local-first memory with provenance and receipts](docs/assets/soul-banner.webp)
 
-# Soul MCP 4.0.1
+# Soul MCP 4.0.2
 
 **Persistent memory with provenance, conflict visibility and outcome receipts. One SQLite database you own.**
 
@@ -247,7 +247,9 @@ Soul is an independent open-source project by **Christian Bucher**, developed
 with **Miguel**, his AI systems co-builder, under human review. That
 collaboration model is stated plainly: the value is in the architecture,
 selection, testing, correction and shipped system — not a claim that every
-line was typed without AI.
+line was typed without AI. In practice, much of the code is drafted with AI
+coding assistants (Anthropic Claude models) and then reviewed, tested and
+integrated by Christian; design decisions, test strategy and releases are his.
 
 If Soul earns a place in your workflow, star the repository, share the MCP
 client you use, and open an issue with the first trust boundary that still gets
