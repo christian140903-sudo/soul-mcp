@@ -34,6 +34,16 @@ database schema or passport format change.
 - README "Verify it yourself" expected outputs match the current
   repository (374 tests, smoke test reports 4.0.2); docs/DEMO.md shows
   the real `doctor` output.
+- README restructured: what it does, quick start (re-checked 2026-10-08
+  against npm 4.0.2), what the tests cover and do not cover, a comparison
+  with the reference memory server, "How this was built" and a plain
+  status. "No model benchmark results exist yet" is replaced by the one
+  descriptive model run (2026-08-14: no quality gain without skills,
+  skill effect unmeasured, raw artifacts not yet published); the README
+  honesty test checks the new wording. Corrected: CI runs the
+  packed-release smoke test on Node 24 and no `npm pack --dry-run`.
+  Removed the downloads badge and the roadmap line for the separate 4.1
+  proxy project; the README now points to ROADMAP.md.
 
 ## 4.0.2 — 2026-08-14
 

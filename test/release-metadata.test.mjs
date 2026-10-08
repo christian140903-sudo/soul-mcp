@@ -22,7 +22,9 @@ test('release metadata: npm, MCP manifest and runtime versions stay aligned', ()
 
 test('public claims: central honesty boundaries remain prominent', () => {
   assert.match(readme, /No worker/i);
-  assert.match(readme, /No model benchmark results/i);
+  // The one descriptive model run (2026-08-14) showed no gain; the README must say so plainly.
+  assert.match(readme, /No demonstrated quality gain/i);
+  assert.match(readme, /skill effect is unmeasured/i);
   assert.match(readme, /never issues `deterministic_verified`/i);
   assert.match(readme, /self_attested/);
 });
