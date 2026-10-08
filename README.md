@@ -195,15 +195,30 @@ test exists specifically to keep it from returning.
 
 ## 23 MCP Tools
 
+The 22 v3 tool contracts remain compatible. v4 adds `soul_run` and extends
+`soul_context` and `soul_feedback` additively.
+
+### Core (memory, provenance, runs)
+
 | Area | Tools |
 |---|---|
 | **Memory** | `soul_remember`, `soul_recall`, `soul_confirm`, `soul_correct`, `soul_forget`, `soul_mark_useful` |
+| **Context, identity & goals** | `soul_context`, `soul_identity`, `soul_about_me`, `soul_goal` |
 | **Provenance & audit** | `soul_timeline`, `soul_status`, `soul_review_queue`, `soul_export`, `soul_import` |
 | **Durable runs** | `soul_run`, `soul_feedback`, `soul_reflect` |
-| **Identity & workbench** | `soul_context`, `soul_workbench`, `soul_resolve`, `soul_deliberate`, `soul_commit_deliberation`, `soul_predict`, `soul_identity`, `soul_about_me`, `soul_goal` |
 
-The 22 v3 tool contracts remain compatible. v4 adds `soul_run` and extends
-`soul_context` and `soul_feedback` additively.
+### Workbench (optional)
+
+Added in v3: deterministic think-assignments (unresolved conflicts, merge
+candidates, old low-confidence inferences), deliberation scaffolds and
+prediction calibration. The core tools work without calling these. When the
+model profile in the constitution allows it and the token budget has room,
+`soul_context` attaches open assignments to its capsule.
+
+| Area | Tools |
+|---|---|
+| **Assignments** | `soul_workbench`, `soul_resolve` |
+| **Deliberation & calibration** | `soul_deliberate`, `soul_commit_deliberation`, `soul_predict` |
 
 ## CLI
 
