@@ -1,5 +1,3 @@
-![Soul — local-first memory with provenance and receipts](docs/assets/soul-banner.webp)
-
 # Soul MCP
 
 **Persistent memory for MCP clients that records where every memory came from, keeps contradictions visible instead of overwriting them, and quarantines stored text that looks like an instruction.**
@@ -9,9 +7,11 @@
 [![Node](https://img.shields.io/node/v/soul-mcp?style=flat-square)](package.json)
 [![license](https://img.shields.io/npm/l/soul-mcp?style=flat-square)](LICENSE)
 
-Soul is a local-first memory server and auditable runtime for Claude Code, Claude Desktop, Cursor, Windsurf and any MCP client that can launch a stdio server. It is for people who want an assistant's long-term memory to be inspectable: every memory carries source type, confidence and status, and work is booked as durable runs with receipts and outcome-linked episodes. It is not an agent and not evidence that a model gets better: it stores, screens and compiles context, and the client decides what to do with it.
+Soul is a local-first memory server and auditable runtime for Claude Code, Claude Desktop, Cursor, Windsurf and any MCP client that can launch a stdio server. It is for people who want an assistant's long-term memory to be inspectable: every memory carries source type, confidence and status, and work is booked as durable runs with receipts and outcome-linked episodes. Soul stores, screens and compiles context; the client decides what to do with it.
 
 **No cloud. No account. No telemetry.** One SQLite database you own: the database (`~/.soul/memories.db`), constitution and backups live under `~/.soul`.
+
+![Soul — local-first memory with provenance and receipts](docs/assets/soul-banner.webp)
 
 ## Try it in two minutes
 
