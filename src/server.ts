@@ -259,7 +259,7 @@ export function createSoulServer(): McpServer {
         'user statement is never overruled by a model verdict alone (outcome: needs_user).',
       inputSchema: z.object({
         assignment_id: z.string(),
-        resolution: z.record(z.unknown()).describe('The answer, matching the assignment\'s respond_with shape.'),
+        resolution: z.record(z.string(), z.unknown()).describe('The answer, matching the assignment\'s respond_with shape.'),
       }),
     },
     async ({ assignment_id, resolution }) => {

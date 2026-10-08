@@ -256,6 +256,38 @@ test('evidence_ref flows through the public MCP path: predict -> workbench -> re
   }
 });
 
+test('soul_resolve input contract: resolution is advertised as an object and a non-object is rejected at the MCP boundary', async () => {
+  // Pins the contract of the record schema in src/server.ts across zod majors
+  // (zod 4 requires z.record(keySchema, valueSchema)). Asserts behaviour, not
+  // validator message wording, which differs between zod versions.
+  const { child, request, notify } = rpcClient();
+  try {
+    await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    notify('notifications/initialized');
+
+    const tools = await request('tools/list');
+    const resolve = tools.result.tools.find((t) => t.name === 'soul_resolve');
+    assert.ok(resolve, 'soul_resolve is listed');
+    assert.equal(resolve.inputSchema.properties.resolution.type, 'object');
+    assert.deepEqual([...resolve.inputSchema.required].sort(), ['assignment_id', 'resolution']);
+
+    for (const resolution of ['yes', 42, ['outcome', 'true'], null]) {
+      const res = await request('tools/call', {
+        name: 'soul_resolve',
+        arguments: { assignment_id: 'any-id', resolution },
+      });
+      assert.equal(res.result?.isError, true, `resolution ${JSON.stringify(resolution)} must be rejected`);
+      assert.match(res.result.content[0].text, /resolution/);
+    }
+  } finally {
+    child.kill();
+  }
+});
+
 test('soul_reflect summary reaches the timeline as session.reflected and survives an export/import roundtrip', async () => {
   const source = rpcClient();
   let passport;
