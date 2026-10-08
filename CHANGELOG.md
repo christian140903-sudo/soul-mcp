@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+Dependency and security maintenance. No MCP tool added or removed, no
+database schema or passport format change.
+
+### Security
+- `@modelcontextprotocol/sdk` 1.29.0 -> 1.32.1 (GHSA-6qxp-vccf-f47h) and
+  transitive fixes via `npm audit fix` (proxy-addr, ip-address, fast-uri,
+  hono, @hono/node-server, qs). `npm audit` on 2026-10-08: before 1
+  critical, 4 high, 3 moderate; after 0.
+
+### Changed
+- zod 3 -> 4. Accept/reject behaviour of all probed tool inputs is
+  unchanged; validation error messages now use zod 4 wording. The
+  advertised input JSON Schemas no longer carry
+  `"additionalProperties": false` (unknown keys were and still are
+  stripped, not rejected), `soul_resolve.resolution` gains
+  `propertyNames`, and integer fields in `soul_run.budget` gain the
+  safe-integer maximum.
+- Dev tooling: eslint 10.12.0, globals 17.13.0, typescript-eslint
+  8.71.1, @types/node 22.20.5; CI uses actions/upload-artifact v7.
+- Dependabot ignores the typescript 7, @types/node >22 and
+  better-sqlite3 13 majors, with the reason for each in
+  `.github/dependabot.yml`.
+
+### Added
+- Test pinning the `soul_resolve` input contract at the MCP boundary.
+
+### Docs
+- README "Verify it yourself" expected outputs match the current
+  repository (374 tests, smoke test reports 4.0.2); docs/DEMO.md shows
+  the real `doctor` output.
+
 ## 4.0.2 — 2026-08-14
 
 Hardening and evidence patch. No MCP tool contract, database schema or

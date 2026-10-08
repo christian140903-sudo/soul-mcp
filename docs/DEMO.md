@@ -17,11 +17,17 @@ npx -y soul-mcp init
 npx -y soul-mcp doctor
 ```
 
-Expected output:
+Expected output of `doctor` (paths and row counts shortened):
 ```
-✓ Database exists at ~/.soul/memories.db
-✓ Schema version: 4.0.1
-✓ MCP server is ready
+Soul Doctor
+✓ database opens and migrates schema v12
+✓ sqlite integrity_check
+✓ fts index consistent
+✓ constitution loads ~/.soul/constitution.json
+✓ backup directory writable ~/.soul/backups
+✓ export/import round-trip (in memory)
+
+All checks passed.
 ```
 
 ### 2. Create a persistent memory (1 minute)
