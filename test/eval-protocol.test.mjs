@@ -293,7 +293,7 @@ test('Router-Reject-Rate und Kosten-Gate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Hash-Determinismus (Preregistration-Anker).
+// Hash-Determinismus (Protokoll-Anker).
 // ---------------------------------------------------------------------------
 
 test('canonicalize: Key-Reihenfolge egal, Arrays bleiben geordnet', () => {

@@ -8,7 +8,7 @@
 > PassportEnvelope@3-Reader (Forward-Kompat).
 >
 > **Baustand (2026-07-17):** Phase 1A gebaut (8 Schemas in `design/contracts/`,
-> Eval-Protokoll als Preregistration-als-Code in `eval/protocol/`,
+> Eval-Protokoll als Code (gehasht) in `eval/protocol/`,
 > SignedPack-Trust); offen: Varianz-Pilot/Dry-Run (in Arbeit, `eval/pilot/`)
 > + formale 1A-Abnahme. Phase 1B: 20 hermetische Aufgaben committed
 > (`eval/tasks/`, 5 Familien × 4); Baseline-Messung offen. Phase 2: Wellen A+B

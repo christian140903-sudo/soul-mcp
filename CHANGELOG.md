@@ -44,6 +44,11 @@ database schema or passport format change.
   packed-release smoke test on Node 24 and no `npm pack --dry-run`.
   Removed the downloads badge and the roadmap line for the separate 4.1
   proxy project; the README now points to ROADMAP.md.
+- README, ROADMAP.md, the design docs and code comments call the eval setup
+  a hashed evaluation protocol (README section "Evaluation protocol")
+  instead of the earlier, stronger label. The 4.0.0 notes below keep their
+  wording as released. Files in `eval/protocol/` are unchanged, because any
+  edit there changes the protocol hash.
 
 ## 4.0.2 — 2026-08-14
 

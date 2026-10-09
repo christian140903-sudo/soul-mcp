@@ -31,7 +31,7 @@ es existieren kann — danach wäre es nur noch mit einem Major zu heilen.
 Golden Tests: alt→neu, neu→alt, Tamper an jeder Sektion einzeln, required-
 Refusal. (Implementierung: separater Auftrag, Spez unten in §Anhang A.)
 
-## F02 — Eval: Preregistration als Code, nicht als Absichtserklärung
+## F02 — Eval: Protokoll als Code, nicht als Absichtserklärung
 
 **Problem:** Selbstbetrug entsteht aus Freiheitsgraden nach dem Blick auf
 Daten — nicht aus böser Absicht.

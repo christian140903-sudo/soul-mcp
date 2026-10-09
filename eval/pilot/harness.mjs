@@ -10,7 +10,7 @@
  * konfirmatorische Aussage.
  *
  * Herkunft der Regeln: eval/protocol/EVAL-PROTOCOL.md + protocol.json
- * (Preregistration als Code), docs/SOUL4-PLAN.md 1A-Akzeptanz
+ * (Protokoll als Code, gehasht), docs/SOUL4-PLAN.md 1A-Akzeptanz
  * ("ein Dry-Run auf 3 Aufgaben × Arm A/B läuft mechanisch durch"),
  * docs/SOUL4-DECISIONS.md F15 (Varianz-Pilot 3×5, task-zentrierte
  * Powerplanung: mehr unabhängige Aufgaben schlägt mehr Repeats).

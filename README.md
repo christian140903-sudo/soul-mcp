@@ -114,7 +114,7 @@ SIGKILL chaos cases. CI runs the full suite on Node 20, 22 and 24; on Node 24 it
 also packs the release, installs the tarball and completes an MCP handshake.
 
 **What they do not cover:** whether a model gives better answers with Soul
-attached (see [Preregistered evaluation](#preregistered-evaluation)), injection
+attached (see [Evaluation protocol](#evaluation-protocol)), injection
 styles the detection patterns do not know, and behavior inside specific
 clients beyond the stdio handshake.
 
@@ -122,7 +122,7 @@ clients beyond the stdio handshake.
 
 - **No worker.** Soul does not spawn agents, models or shell commands. It compiles context; execution is the client's choice.
 - **No cloud.** The database never leaves `~/.soul`. Imports are checksummed and screened; the server makes no background network calls.
-- **No demonstrated quality gain.** The one model run so far found none for Soul without skills; the skill effect is unmeasured (see [Preregistered evaluation](#preregistered-evaluation)).
+- **No demonstrated quality gain.** The one model run so far found none for Soul without skills; the skill effect is unmeasured (see [Evaluation protocol](#evaluation-protocol)).
 - **No guarantee against injection.** Detection is pattern-based: text that does not look like an instruction is stored normally, and a new injection style can get through. Quarantine is one layer, not proof (risk R1 in the [threat model](docs/THREAT-MODEL.md), written in German).
 - **No verified receipts.** Outcomes are booked as `self_attested`; Soul 4 never issues `deterministic_verified`.
 - **No competence routing.** Episodes record outcomes; causal claims require evidence links.
@@ -162,7 +162,7 @@ pinning; tampering, replay and downgrade attempts fail closed. A context capsule
 exposes at most three task-matched promoted skills. Start with the
 [example skill](examples/minimal-fix-with-regression-test.skill.json).
 
-### Preregistered evaluation
+### Evaluation protocol
 
 The repository contains a hashed evaluation protocol, deterministic statistics
 and 20 hermetic code tasks with counterfactual verifiers (`eval/`). The
@@ -175,7 +175,7 @@ claude-sonnet-5 with soul-mcp 4.0.1 attached but no skills. Both solved 18 of
 20. The Soul arm cost about 2.7× as much per run and took about 2.3× as long,
 because of three extra MCP round trips. So plain runtime attachment showed no
 quality gain on this small set, and the skill effect is unmeasured. This run
-was not one of the preregistered gates, and its raw artifacts are not yet
+was not one of the protocol's gates, and its raw artifacts are not yet
 published, so it cannot be checked from outside yet. Infrastructure is not
 evidence that a model became better.
 
@@ -188,7 +188,7 @@ evidence that a model became better.
 - **v3 thinks with the model:** workbench assignments, deliberation,
   prediction calibration and optional local semantic retrieval.
 - **v4 makes work durable:** task contracts, runs, receipts, episodes, guarded
-  skills and a preregistered evaluation path.
+  skills and a hashed evaluation protocol.
 
 The old failure is part of the story because the current packaging regression
 test exists specifically to keep it from returning.
