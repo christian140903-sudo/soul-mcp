@@ -63,7 +63,7 @@ export type EventType =
   | 'pack.imported'
   | 'pack.refused'
   | 'key.pinned'
-  // Written by eval/protocol/hash.mjs (preregistration-as-code, F05) via
+  // Written by eval/protocol/hash.mjs (hashed protocol-as-code, F05) via
   // direct SQL against the same events table — listed here so the union
   // stays the single source of truth for every event type on the ledger.
   | 'eval.protocol_registered';

@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'child_process';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -76,6 +76,15 @@ test('the default binary invocation serves MCP: initialize, list tools, call a t
     for (const expected of ['soul_remember', 'soul_recall', 'soul_context', 'soul_confirm', 'soul_correct', 'soul_timeline', 'soul_review_queue', 'soul_export', 'soul_import']) {
       assert.ok(names.includes(expected), `missing tool ${expected}`);
     }
+
+    // The README tool section names every registered tool exactly once, and its heading carries the count.
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    const section = readme.match(/^## (\d+) MCP Tools\n([\s\S]*?)\n## /m);
+    assert.ok(section, 'README has a "## <n> MCP Tools" section');
+    const tableRows = section[2].split('\n').filter((line) => line.startsWith('| **'));
+    const inTables = tableRows.flatMap((line) => [...line.matchAll(/`(soul_[a-z_]+)`/g)].map((m) => m[1]));
+    assert.deepEqual([...inTables].sort(), [...names].sort(), 'README tool tables list exactly the registered tools');
+    assert.equal(Number(section[1]), names.length, 'README heading count matches the registered tools');
 
     const resources = await request('resources/list');
     const uris = resources.result.resources.map((r) => r.uri);
@@ -251,6 +260,38 @@ test('evidence_ref flows through the public MCP path: predict -> workbench -> re
     assert.equal(row.evidence_ref, 'test/server.test.mjs run');
     assert.equal(row.resolution_actor, 'agent');
     assert.equal(row.domain, 'code');
+  } finally {
+    child.kill();
+  }
+});
+
+test('soul_resolve input contract: resolution is advertised as an object and a non-object is rejected at the MCP boundary', async () => {
+  // Pins the contract of the record schema in src/server.ts across zod majors
+  // (zod 4 requires z.record(keySchema, valueSchema)). Asserts behaviour, not
+  // validator message wording, which differs between zod versions.
+  const { child, request, notify } = rpcClient();
+  try {
+    await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'soul-test', version: '0.0.0' },
+    });
+    notify('notifications/initialized');
+
+    const tools = await request('tools/list');
+    const resolve = tools.result.tools.find((t) => t.name === 'soul_resolve');
+    assert.ok(resolve, 'soul_resolve is listed');
+    assert.equal(resolve.inputSchema.properties.resolution.type, 'object');
+    assert.deepEqual([...resolve.inputSchema.required].sort(), ['assignment_id', 'resolution']);
+
+    for (const resolution of ['yes', 42, ['outcome', 'true'], null]) {
+      const res = await request('tools/call', {
+        name: 'soul_resolve',
+        arguments: { assignment_id: 'any-id', resolution },
+      });
+      assert.equal(res.result?.isError, true, `resolution ${JSON.stringify(resolution)} must be rejected`);
+      assert.match(res.result.content[0].text, /resolution/);
+    }
   } finally {
     child.kill();
   }

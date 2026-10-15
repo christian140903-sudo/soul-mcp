@@ -7,7 +7,7 @@ Entwicklung. Es ist **nie** ein konfirmatorisches Gate-Set — dafür gilt der
 Held-out-Prozess unten (F08), dessen Sets hier bewusst NICHT liegen.
 
 Herkunft der Regeln: `eval/protocol/EVAL-PROTOCOL.md` + `protocol.json`
-(Preregistration als Code), `docs/SOUL4-DECISIONS.md` F04/F08,
+(Protokoll als Code, gehasht), `docs/SOUL4-DECISIONS.md` F04/F08,
 `docs/THREAT-MODEL.md` TB7 + §5. Dieses Verzeichnis liegt **außerhalb** von
 `eval/protocol/` und ändert den Protokoll-Hash nicht.
 

@@ -16,7 +16,7 @@
 | Baustein | Status |
 |---|---|
 | 1A Schemas | ✓ gebaut — 8 Schemas in `design/contracts/` (TaskContract@1, SkillManifest@1, ReceiptV1, VerifierResult@1, CapabilityManifest@1, Episode@1, AuthorityEnvelope@1, SignedPackEnvelope@1), Golden-Beispiele + Validierungstests |
-| 1A Eval-Protokoll | ✓ gebaut — `eval/protocol/` (EVAL-PROTOCOL.md, protocol.json, hash.mjs, statistics.mjs) als Preregistration-als-Code |
+| 1A Eval-Protokoll | ✓ gebaut — `eval/protocol/` (EVAL-PROTOCOL.md, protocol.json, hash.mjs, statistics.mjs) als gehashtes Protokoll-als-Code |
 | 1A SignedPack-Trust | ✓ gebaut — Envelope-Schema + Import-Implementierung (TOFU-Pinning, Downgrade-Schutz, fail-closed; `test/signed-pack.test.mjs`, `test/skills.test.mjs`) |
 | 1A Varianz-Pilot / Dry-Run | in Arbeit (`eval/pilot/` — Harness + Dry-Run-Skripte); formale 1A-Abnahme offen |
 | 1B Aufgaben | ✓ 20 hermetische Code-Aufgaben committed (`eval/tasks/`, 5 Familien × je 4); Baseline-Zahlen Arm A+B offen |
@@ -53,7 +53,7 @@
 - Schemas (JSON Schema, versioniert, mit Golden-Beispielen + Validierungstests):
   `TaskContract@1`, `SkillManifest@1`, `ReceiptV1`, `VerifierResult@1`,
   `CapabilityManifest@1`, `Episode@1` (Exportvertrag, PII-Klassifizierung pro Feld).
-- Eval-Protokoll als **Preregistration als Code** (DECISIONS F02):
+- Eval-Protokoll **als Code** (DECISIONS F02):
   `eval/protocol/` = EVAL-PROTOCOL.md + Analyse-Skript, beides committed und
   gehasht VOR dem ersten Messlauf; Ergebnisse entstehen nur durch das Skript;
   Änderung = sichtbare Revision, laufende Welle verworfen.

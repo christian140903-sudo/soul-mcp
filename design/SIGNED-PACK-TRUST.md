@@ -7,7 +7,7 @@
 
 ## 1. Trust-Modell — ehrlich und minimal
 
-Zielgruppe ist ein **Ein-Personen-Publisher** (Chriso/Miguel teilt Skill-Packs
+Zielgruppe ist ein **Ein-Personen-Publisher** (ein einzelner Autor teilt Skill-Packs
 mit sich selbst über Maschinen hinweg, später vielleicht mit wenigen Bekannten).
 Deshalb:
 

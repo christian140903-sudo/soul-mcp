@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+Dependency and security maintenance. No MCP tool added or removed, no
+database schema or passport format change.
+
+### Security
+- `@modelcontextprotocol/sdk` 1.29.0 -> 1.32.1 (GHSA-6qxp-vccf-f47h) and
+  transitive fixes via `npm audit fix` (proxy-addr, ip-address, fast-uri,
+  hono, @hono/node-server, qs; dev-only: brace-expansion). `npm audit`
+  on 2026-10-08: before 1 critical, 4 high, 3 moderate; after 0.
+
+### Changed
+- zod 3 -> 4. Validation error messages now use zod 4 wording. One
+  accept/reject change: the integer fields in `soul_run.budget`
+  (`max_tokens`, `max_wall_clock_s`, `max_attempts`) now reject values
+  above 9007199254740991 (`Number.MAX_SAFE_INTEGER`), which zod 3
+  accepted, and the advertised schemas carry that maximum. All other
+  probed tool inputs are accepted or rejected as before. The advertised
+  input JSON Schemas no longer carry `"additionalProperties": false`
+  (unknown keys were and still are stripped, not rejected) and
+  `soul_resolve.resolution` gains `propertyNames`.
+- Dev tooling: eslint 10.12.0, globals 17.13.0, typescript-eslint
+  8.71.1, @types/node 22.20.5; CI uses actions/upload-artifact v7.
+- Dependabot ignores the typescript 7, @types/node >22 and
+  better-sqlite3 13 majors, with the reason for each in
+  `.github/dependabot.yml`.
+
+### Added
+- Test pinning the `soul_resolve` input contract at the MCP boundary.
+
+### Docs
+- README "Verify it yourself" expected outputs match the current
+  repository (374 tests, smoke test reports 4.0.2); docs/DEMO.md shows
+  the real `doctor` output.
+- README restructured: what it does, quick start (re-checked 2026-10-08
+  against npm 4.0.2), what the tests cover and do not cover, a comparison
+  with the reference memory server, "How this was built" and a plain
+  status. "No model benchmark results exist yet" is replaced by the one
+  descriptive model run (2026-08-14: no quality gain without skills,
+  skill effect unmeasured, raw artifacts not yet published); the README
+  honesty test checks the new wording. Corrected: CI runs the
+  packed-release smoke test on Node 24 and no `npm pack --dry-run`.
+  Removed the downloads badge and the roadmap line for the separate 4.1
+  proxy project; the README now points to ROADMAP.md.
+- README, ROADMAP.md, the design docs and code comments call the eval setup
+  a hashed evaluation protocol (README section "Evaluation protocol")
+  instead of the earlier, stronger label. The 4.0.0 notes below keep their
+  wording as released. Files in `eval/protocol/` are unchanged, because any
+  edit there changes the protocol hash.
+
 ## 4.0.2 — 2026-08-14
 
 Hardening and evidence patch. No MCP tool contract, database schema or

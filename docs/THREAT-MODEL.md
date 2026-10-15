@@ -146,8 +146,8 @@ Lauf ungültig). Manifeste + Splits vorab gehasht und committed. Gate-Sets
 werden nach jedem konfirmatorischen Gebrauch pensioniert (`spent/`).
 Aufgaben-Generierung durch getrennten Agenten. Deterministische Checks
 dominieren Modell-Urteile; Promotion nur auf nie gesehenen Aufgaben;
-Chriso-Stichproben-Audit bleibt im Loop. Eval-Protokoll ist Preregistration
-als Code: Analyse-Skript + Protokoll vor dem ersten Lauf committed und
+Chriso-Stichproben-Audit bleibt im Loop. Eval-Protokoll ist als Code
+festgelegt: Analyse-Skript + Protokoll vor dem ersten Lauf committed und
 gehasht (DECISIONS F02).
 
 ### TB8: Konkurrenz auf der DB (M5)

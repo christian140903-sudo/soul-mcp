@@ -10,6 +10,25 @@ updates:
         dependency-type: production
       development-dependencies:
         dependency-type: development
+    # Majors that cannot land as a grouped bump. Minor and patch updates of
+    # these packages still arrive. Remove an entry once its reason is gone.
+    ignore:
+      # TypeScript 7 is outside typescript-eslint's peer range
+      # (typescript >=4.8.4 <6.1.0), so `npm ci` fails with ERESOLVE
+      # (Dependabot PR #8, 2026-09). Revisit when typescript-eslint
+      # supports it.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # @types/node stays on the Node line the project builds and lints
+      # against (22). package.json promises Node >=20 and CI tests 20/22/24;
+      # newer majors would type APIs that older supported runtimes lack.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # better-sqlite3 13 requires Node >=22, but package.json promises
+      # Node >=20 and CI tests Node 20. Lift this together with dropping
+      # Node 20 support (a breaking change and an owner decision).
+      - dependency-name: better-sqlite3
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

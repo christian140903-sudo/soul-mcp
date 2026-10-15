@@ -43,7 +43,7 @@
   ],
   "author": "Christian Bucher",
   "contributors": [
-    "Miguel (AI systems co-builder, under human review)"
+    "AI-assisted development under human direction and review"
   ],
   "license": "MIT",
   "files": [
@@ -69,20 +69,20 @@
     "access": "public"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "ajv": "^8.20.0",
     "better-sqlite3": "^12.6.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.5",
     "c8": "^12.0.0",
-    "eslint": "^10.8.1",
-    "globals": "^17.11.0",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.71.1"
   },
   "mcpName": "io.github.christian140903-sudo/soul-mcp"
 }
