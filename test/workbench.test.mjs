@@ -39,7 +39,7 @@ test('a disputed pair becomes a dispute assignment; verdict compatible un-disput
 
 test('a model verdict never overrules a user statement (needs_user guard)', () => {
   const a = capture({ content: 'User lives in Vienna since 2024', type: 'identity', sourceType: 'user_statement' });
-  const b = capture({ content: 'User lives in Vienna near Korneuburg since 2020', type: 'identity', sourceType: 'user_statement' });
+  const b = capture({ content: 'User lives in Vienna near the river since 2020', type: 'identity', sourceType: 'user_statement' });
   assert.ok(b.conflicts.length >= 1);
   const assignment = findAssignment(computeAssignments(), 'dispute', a.memory.id);
   assert.ok(assignment);
@@ -88,7 +88,7 @@ test('near-duplicates become a merge_review; merge creates a model_assisted memo
     )
   );
   const a = capture({ content: 'The daemon exposes 128 endpoints on port 4200' });
-  const b = capture({ content: 'Miguel daemon runs on :4200 with 128 HTTP endpoints' });
+  const b = capture({ content: 'Memory daemon runs on :4200 with 128 HTTP endpoints' });
   await backfillVectors();
 
   const assignment = findAssignment(computeAssignments(), 'merge_review', a.memory.id);
@@ -96,7 +96,7 @@ test('near-duplicates become a merge_review; merge creates a model_assisted memo
 
   const result = resolveAssignment(assignment.id, {
     action: 'merge',
-    merged_content: 'The Miguel daemon runs on port 4200 and exposes 128 HTTP endpoints.',
+    merged_content: 'The memory daemon runs on port 4200 and exposes 128 HTTP endpoints.',
     reasoning: 'Same fact in two phrasings; one memory suffices.',
   });
   assert.equal(result.applied, true);
